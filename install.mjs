@@ -26,7 +26,7 @@
  * 卸载是精确可逆的：只删本插件自己加的那一条依赖、那一个 bundles 项、那一个 junction，
  * 其余内容原样保留，并且每次写盘前都会先备份 package.json。
  */
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,11 +40,12 @@ const ENTRY_ID = 'donevoice'
 
 /** 解析命令行参数。 */
 function parseArgs(argv) {
-  const args = { apply: false, uninstall: false, profile: undefined, help: false }
+  const args = { apply: false, uninstall: false, profile: undefined, link: false, help: false }
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
     if (token === '--apply') args.apply = true
     else if (token === '--uninstall') args.uninstall = true
+    else if (token === '--link') args.link = true
     else if (token === '--help' || token === '-h') args.help = true
     else if (token === '--profile') { args.profile = argv[index + 1]; index += 1 }
     else if (token.startsWith('--profile=')) args.profile = token.slice('--profile='.length)
@@ -61,8 +62,37 @@ function usage() {
     '  node install.mjs --apply              执行安装',
     '  node install.mjs --uninstall          预演卸载',
     '  node install.mjs --uninstall --apply  执行卸载',
+    '  node install.mjs --link               开发模式：不复制，直接把 profile 链到本插件源码目录',
     '  node install.mjs --profile <目录>     指定 profile（默认自动在 $DSH_HOME/profiles 下找；DSH_HOME 优先于 ~/.dsh）',
+    '',
+    '安装位置（默认）：插件会被**复制**到 <DSH_HOME>/donevoice/plugin/，profile 里放一条指向它的链接。',
+    '  也就是说装完之后，插件本体就在 C:\\Users\\<你>\\.dsh 里，和从 npm / GitHub 装的其它插件一样；',
+    '  源码目录与安装结果**彻底解耦**——卸载只会删掉 .dsh 里那份副本，永远碰不到你的源码目录。',
+    '  只有开发本插件时才用 --link（改一个文件即刻生效，代价是卸载可能连带删源码目录）。',
   ].join('\n'))
+}
+
+/**
+ * DSH 的 home 目录（与宿主半区 `index.js` 的 `homeDir()` 同口径：`DSH_HOME` 优先，否则 `~/.dsh`）。
+ * @returns 绝对路径。
+ */
+function resolveHome() {
+  const fromEnv = typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME.trim() : ''
+  return fromEnv !== '' ? fromEnv : join(homedir(), '.dsh')
+}
+
+/**
+ * 默认安装位置：`<home>/donevoice/plugin/`。
+ *
+ * 为什么要复制到这里，而不是让 profile 直接指向插件源码目录（今天的真机事故）：
+ * 插件在 profile 里是一条 **junction**；DSH 卸载插件时如果"递归删除跟随链接"，
+ * 就会把 junction 指向的整个目录清空——源码目录因此被删过一次。
+ * 装进 `.dsh` 里之后，那个"会被连带删掉"的目录只是这份副本，
+ * 与用户的源码目录彻底解耦；这也与从 npm / GitHub 安装的其它插件落点一致（都在 `.dsh` 内）。
+ * @returns 绝对路径。
+ */
+function installTargetDir() {
+  return join(resolveHome(), 'donevoice', 'plugin')
 }
 
 /**
@@ -149,14 +179,78 @@ function writeJson(path, value) {
 }
 
 /**
+ * 把插件目录整棵复制到目标位置（跳过 `.git` 与 `node_modules`）。
+ * @param from 源目录。
+ * @param to 目标目录（须已存在）。
+ */
+function copyPluginTree(from, to) {
+  for (const name of readdirSync(from)) {
+    if (name === '.git' || name === 'node_modules') continue
+    const source = join(from, name)
+    const target = join(to, name)
+    if (statSync(source).isDirectory()) {
+      mkdirSync(target, { recursive: true })
+      copyPluginTree(source, target)
+    } else {
+      copyFileSync(source, target)
+    }
+  }
+}
+
+/**
+ * 只摘掉一条链接本身，**绝不递归进入目标目录**。
+ *
+ * ⚠️ 这是今天真机事故的直接教训：插件在 profile 里是一条 junction，指向插件目录；
+ * "递归删除"如果跟随了链接，就会把目标目录里的文件全部清空（用户源码目录被删过一次）。
+ * 所以这里对链接一律只做 unlink / rmdir（摘掉重解析点），只有**真的是普通目录**时才递归删。
+ * @param path 链接或目录路径。
+ */
+function removeLink(path) {
+  const stat = lstatSync(path)
+  if (stat.isSymbolicLink()) {
+    try {
+      unlinkSync(path)
+    } catch {
+      rmdirSync(path)
+    }
+    return
+  }
+  if (stat.isDirectory()) {
+    rmSync(path, { recursive: true, force: true })
+    return
+  }
+  rmSync(path, { force: true })
+}
+
+/**
+ * 解析链接当前指向哪里（拿不到就返回 null）。
+ * @param path 链接路径。
+ * @returns 规范化后的绝对路径或 null。
+ */
+function linkTargetOf(path) {
+  try {
+    return resolve(realpathSync(path))
+  } catch {
+    return null
+  }
+}
+
+/**
  * 安装主体。
- * @param options `{ profile, apply }`。
+ *
+ * 两种模式：
+ *   · **默认（复制）**：把插件复制到 `<DSH_HOME>/donevoice/plugin/`，profile 指向那份副本。
+ *     与 npm / GitHub 安装的其它插件落点一致（都在 `.dsh` 内），且源码目录与安装结果解耦。
+ *   · `--link`（开发）：profile 直接指向本插件源码目录，改一个文件即刻生效。
+ * @param options `{ profile, apply, link }`。
  */
 function install(options) {
   const packageJsonPath = join(options.profile, 'package.json')
   const modulesDir = join(options.profile, 'node_modules')
   const linkPath = join(modulesDir, PACKAGE_NAME)
-  const linkTarget = PLUGIN_DIR.replace(/\\/g, '/')
+  const copyMode = options.link !== true
+  const copyDir = copyMode ? installTargetDir() : null
+  const linkTarget = (copyMode ? copyDir : PLUGIN_DIR).replace(/\\/g, '/')
 
   const steps = []
   const problems = []
@@ -170,6 +264,11 @@ function install(options) {
   //    路径长相只是长相，不该决定能不能装。
   if (options.profile.indexOf('.dsh') < 0) {
     notes.push('profile 路径不含 .dsh（' + options.profile + '）：自定义 DSH_HOME 很常见，继续安装')
+  }
+  if (copyMode) {
+    steps.push({ kind: 'copy', text: '复制插件到 ' + copyDir + '（就在 .dsh 里，与你的源码目录解耦）' })
+  } else {
+    notes.push('--link 开发模式：profile 将直接指向源码目录 ' + PLUGIN_DIR + '；卸载时请确保该目录有备份（如 git）')
   }
 
   let manifest = null
@@ -190,20 +289,33 @@ function install(options) {
     }
   }
 
+  const wantTarget = copyMode ? copyDir : PLUGIN_DIR
+  let needsLink = false
   const linkExists = existsSync(linkPath)
   if (linkExists) {
     const stat = lstatSync(linkPath)
     if (stat.isSymbolicLink() !== true && stat.isDirectory() !== true) {
       problems.push('目标已存在且不是目录/链接，拒绝覆盖：' + linkPath)
     } else {
-      steps.push({ kind: 'skip', text: 'node_modules/' + PACKAGE_NAME + ' 已存在（link 或目录）' })
+      // 已存在也要看**指向对不对**：在复制模式与 --link 模式之间切换时必须重新指向，
+      // 否则会出现"文件复制进 .dsh 了，链接却还指着源码目录"的假象（第一版就漏了这点）。
+      const current = linkTargetOf(linkPath)
+      if (current !== null && current.toLowerCase() !== resolve(wantTarget).toLowerCase()) {
+        steps.push({ kind: 'relink', text: '重新指向：' + linkPath + '\n          现在指向 ' + current + '\n          改为    ' + wantTarget })
+        needsLink = true
+      } else {
+        steps.push({ kind: 'skip', text: 'node_modules/' + PACKAGE_NAME + ' 已指向 ' + wantTarget })
+      }
     }
   } else {
-    steps.push({ kind: 'link', text: '建立链接：' + linkPath + '  →  ' + linkTarget })
+    steps.push({ kind: 'link', text: '建立链接：' + linkPath + '  →  ' + wantTarget })
+    needsLink = true
   }
 
   console.log('== 安装计划 ==')
-  console.log('插件目录   ：' + PLUGIN_DIR)
+  console.log('插件源码   ：' + PLUGIN_DIR)
+  console.log('安装模式   ：' + (copyMode ? '复制到 .dsh（默认，推荐）' : '--link 直连源码（开发用）'))
+  if (copyMode) console.log('安装位置   ：' + copyDir)
   console.log('profile    ：' + options.profile)
   console.log('包名 / 条目：' + PACKAGE_NAME + ' / ' + ENTRY_ID)
   console.log('')
@@ -235,6 +347,20 @@ function install(options) {
   }
 
   // ── 真正写盘 ────────────────────────────────────────────────────────────────
+  // 默认模式：先把插件复制进 .dsh（每次覆盖，保证装的就是当前这份源码），再让 profile 指向副本。
+  if (copyMode) {
+    try {
+      if (existsSync(copyDir)) rmSync(copyDir, { recursive: true, force: true })
+      mkdirSync(copyDir, { recursive: true })
+      copyPluginTree(PLUGIN_DIR, copyDir)
+      console.log('已复制插件到 ' + copyDir)
+    } catch (error) {
+      console.error('复制插件失败：' + String(error))
+      process.exitCode = 3
+      return
+    }
+  }
+
   const backup = packageJsonPath + '.donevoice-backup-' + new Date().toISOString().replace(/[:.]/g, '-')
   copyFileSync(packageJsonPath, backup)
   console.log('已备份 package.json → ' + backup)
@@ -250,19 +376,32 @@ function install(options) {
   writeJson(packageJsonPath, next)
   console.log('已更新 ' + packageJsonPath)
 
-  if (existsSync(linkPath) !== true) {
+  if (needsLink) {
     mkdirSync(modulesDir, { recursive: true })
+    // ⚠️ target 必须跟着安装模式走：默认模式指向 .dsh 里的副本，--link 模式才指向源码目录。
+    //    （这里曾漏改，结果复制模式也把 junction 指到了源码目录 —— 那等于没解决问题。）
+    const junctionTarget = copyMode ? copyDir : PLUGIN_DIR
+    if (linkExists) {
+      // 重新指向：只摘掉链接本身（removeLink 不会递归进目标目录），再建新的。
+      try {
+        removeLink(linkPath)
+      } catch (error) {
+        console.error('移除旧链接失败：' + String(error))
+        process.exitCode = 3
+        return
+      }
+    }
     try {
-      symlinkSync(PLUGIN_DIR, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
+      symlinkSync(junctionTarget, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
     } catch (error) {
       console.error('建立链接失败：' + String(error))
       // junction 是用户级操作，**不需要管理员**（旧文案写错了，审计时抓到的）。
       console.error('可手动执行（普通 PowerShell 即可，无需管理员）：')
-      console.error('  New-Item -ItemType Junction -Path "' + linkPath + '" -Target "' + PLUGIN_DIR + '"')
+      console.error('  New-Item -ItemType Junction -Path "' + linkPath + '" -Target "' + junctionTarget + '"')
       process.exitCode = 3
       return
     }
-    console.log('已建立链接 ' + linkPath)
+    console.log('已建立链接 ' + linkPath + '  →  ' + junctionTarget)
   }
 
   console.log('')
@@ -280,11 +419,15 @@ function install(options) {
 
 /**
  * 卸载主体。
+ *
+ * 三种模式留下的东西都会被清理：profile 的依赖项、bundles 项、node_modules 里的链接，
+ * 以及**默认模式下 `.dsh` 里的那份副本**（`<home>/donevoice/plugin/`，只认这个路径，绝不碰别处）。
  * @param options `{ profile, apply }`。
  */
 function uninstall(options) {
   const packageJsonPath = join(options.profile, 'package.json')
   const linkPath = join(options.profile, 'node_modules', PACKAGE_NAME)
+  const copyDir = installTargetDir()
 
   if (!existsSync(packageJsonPath)) {
     console.log('profile 的 package.json 不存在：' + packageJsonPath + ' —— 无需卸载')
@@ -295,12 +438,22 @@ function uninstall(options) {
   const bundles = Array.isArray(manifest.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
   const hasBundle = bundles.includes(PACKAGE_NAME)
   const hasLink = existsSync(linkPath)
+  // 只删"看起来确实是我们那份副本"的目录（有 package.json 且 name 对得上），避免误删别人的东西。
+  let hasCopy = false
+  try {
+    if (existsSync(join(copyDir, 'package.json'))) {
+      hasCopy = readJson(join(copyDir, 'package.json')).name === PACKAGE_NAME
+    }
+  } catch {
+    hasCopy = false
+  }
 
   console.log('== 卸载计划 ==')
   console.log('  删除依赖项：' + (hasDependency ? '是' : '否（本来就是干净的）'))
   console.log('  删除 bundles 项：' + (hasBundle ? '是' : '否'))
   console.log('  删除链接：' + linkPath + (hasLink ? '' : '（不存在）'))
-  console.log('  只动这三处，其余原样保留。')
+  console.log('  删除 .dsh 里的副本：' + (hasCopy ? copyDir : '无（当前不是默认复制模式）'))
+  console.log('  只动这几处，其余原样保留；**你的插件源码目录不会被碰**。')
 
   if (options.apply !== true) {
     console.log('')
@@ -315,8 +468,20 @@ function uninstall(options) {
   if (hasBundle) next.dsh.profile.bundles = bundles.filter((entry) => entry !== PACKAGE_NAME)
   writeJson(packageJsonPath, next)
   if (hasLink) {
-    // 解析后的绝对路径已在上方打印过，这里只删这一个链接本身（rmSync 默认不跟随 symlink 删除目标）
-    rmSync(linkPath, { recursive: true, force: true })
+    // 只删这一个链接本身：removeLink 对链接走 unlink/rmdir，**绝递归跟随**（今天的真机事故）。
+    try {
+      removeLink(linkPath)
+    } catch (error) {
+      console.warn('删除链接失败（可手动删）：' + String(error))
+    }
+  }
+  if (hasCopy) {
+    try {
+      rmSync(copyDir, { recursive: true, force: true })
+      console.log('已删除副本 ' + copyDir)
+    } catch (error) {
+      console.warn('删除副本失败（可手动删）：' + String(error))
+    }
   }
   console.log('已备份 → ' + backup)
   console.log('卸载完成。重启 DSH 桌面进程后生效。')
@@ -334,7 +499,7 @@ if (args.help) {
     console.error(String(error instanceof Error ? error.message : error))
     process.exit(2)
   }
-  const options = { profile, apply: args.apply }
+  const options = { profile, apply: args.apply, link: args.link }
   console.log('（' + (args.apply ? '执行模式：会写入文件' : '预演模式：不会写入任何文件') + '）')
   if (args.uninstall) uninstall(options)
   else install(options)

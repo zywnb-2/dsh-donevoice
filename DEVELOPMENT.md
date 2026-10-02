@@ -238,7 +238,7 @@ dsh-donevoice/
 ├─ host-config.js       配置契约（零依赖纯模块，宿主用；客户端持内联副本）
 ├─ cordis.patch.yml     把宿主条目 donevoice 插入 profile
 ├─ package.json         dsh.bundle.patch + dsh.client.platform=web
-├─ install.mjs          安装/卸载（默认预演、可逆、profile 自动定位）
+├─ install.mjs          安装/卸载（默认**复制到 .dsh**、可逆、profile 自动定位；`--link` 开发直连）
 ├─ locale/{zh,en}.json  插件文案
 ├─ icon.svg
 ├─ LICENSE              MIT

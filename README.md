@@ -90,7 +90,7 @@
 ```powershell
 cd <你放这个插件的目录>\dsh-donevoice
 node install.mjs            # 预演：只打印要动哪几个文件，不写盘
-node install.mjs --apply    # 确认后执行（自动备份 profile 的 package.json）
+node install.mjs --apply    # 确认后执行（复制到 .dsh + 备份 profile 的 package.json）
 ```
 
 没装 Node 也能跑（两条都实测可用）：
@@ -106,9 +106,21 @@ $env:ELECTRON_RUN_AS_NODE = 1
 
 脚本只做三件事，件件可逆，且**不动 profile 自己的 `cordis.patch.yml`**：
 
-1. profile 的 `package.json` 加一条 `"dsh-donevoice": "link:<插件目录>"`
-2. `dsh.profile.bundles` 追加 `"dsh-donevoice"`
-3. `node_modules/` 下建一个指向插件目录的链接
+1. **把插件复制到 `<你的 DSH home>\donevoice\plugin\`**（默认就是 `C:\Users\<你>\.dsh\donevoice\plugin\`，和从 npm / GitHub 装的其它插件一样，都在 `.dsh` 里）
+2. profile 的 `package.json` 加一条 `"dsh-donevoice": "link:<上一步那份副本>"`
+3. `dsh.profile.bundles` 追加 `"dsh-donevoice"`，并在 `node_modules/` 下建一条指向**副本**的链接
+
+> **为什么是复制而不是直接指向源码目录**：插件在 profile 里是一条 junction。如果 DSH（或别的工具）卸载插件时"递归删除跟随链接"，被清空的就是 junction 指向的那个目录——**真实事故**：有人因此被删掉了整个插件源码目录。
+> 复制进 `.dsh` 之后，那个"可能被连带删掉"的目录只是副本，**永远碰不到你的源码**。
+>
+> 只有**开发这个插件本身**时才用 `--link`：
+> ```powershell
+> node install.mjs --apply --link    # profile 直接指向源码目录，改一个文件即刻生效（代价：卸载可能连带删源码，请先 git 保护）
+> ```
+> 两种模式可以随时互相切换，脚本会自动把链接**重新指向**正确位置。
+
+> ⚠️ **换安装方式前先卸载旧方式**：如果你先前用**本地目录 / `--link`** 装过，请先
+> `node install.mjs --uninstall --apply`，再换成上面的 GitHub 入口安装——否则卸载旧版时可能把那个目录里的文件一起删掉。
 
 每次写盘前都会把 profile 的 `package.json` 备份成 `package.json.donevoice-backup-<时间戳>.json`（不会自动清理，可手动删）。
 
