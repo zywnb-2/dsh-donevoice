@@ -179,13 +179,13 @@ function writeJson(path, value) {
 }
 
 /**
- * 把插件目录整棵复制到目标位置（跳过 `.git` 与 `node_modules`）。
+ * 把插件目录整棵复制到目标位置（跳过 `.git`、`node_modules` 与本地工作数据）。
  * @param from 源目录。
  * @param to 目标目录（须已存在）。
  */
 function copyPluginTree(from, to) {
   for (const name of readdirSync(from)) {
-    if (name === '.git' || name === 'node_modules') continue
+    if (name === '.git' || name === '.workbuddy-ai' || name === 'node_modules') continue
     const source = join(from, name)
     const target = join(to, name)
     if (statSync(source).isDirectory()) {
@@ -446,8 +446,8 @@ function install(options) {
     // ⚠️ target 必须跟着安装模式走：默认模式指向 .dsh 里的副本，--link 模式才指向源码目录。
     //    （这里曾漏改，结果复制模式也把 junction 指到了源码目录 —— 那等于没解决问题。）
     const junctionTarget = copyMode ? copyDir : PLUGIN_DIR
-    if (linkExists) {
-      // 重新指向：只摘掉链接本身（removeLink 不会递归进目标目录），再建新的。
+    if (linkKind !== 'missing') {
+      // 重新指向：只摘掉已有条目本身（链接不递归进入目标目录），再建新的。
       try {
         removeLink(linkPath)
       } catch (error) {

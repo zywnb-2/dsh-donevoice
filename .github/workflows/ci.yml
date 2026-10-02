@@ -1,8 +1,7 @@
 name: CI
 
-# 这个工作流只回答一个问题：**用户从 GitHub 装得下来吗？**
-# 语法、package.json 契约、files 覆盖、有没有会挡住 pnpm 的构建脚本——全在
-# scripts/check-package.mjs 里，这里只负责在多平台上把它跑起来。
+# 校验包结构、本地 ZIP 复制安装及脚本语法；GitHub 探活受用户网络影响，
+# 实际 DSH 启动还需在目标版本真机验证。检查逻辑在 scripts/check-package.mjs。
 on:
   push:
     branches: [main]

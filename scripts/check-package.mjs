@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 发布自检：确认这个仓库「从 GitHub 装得下来、装下来能跑」。
+ * 发布自检：验证包结构与本地复制安装流程（不替代 GitHub 连通性和真机启动测试）。
  *
  * 为什么需要它：DSH 的插件安装走 pnpm 的 git 依赖通道——先把仓库的
  * codeload tarball 整包拉下来，再用 npm-packlist 按 package.json 的
@@ -18,7 +18,7 @@
  * 退出码：0 全部通过；1 有检查项失败。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -241,6 +241,79 @@ if (packed) {
   else fail('产物含语言包', 'locale/*.json 没进包，设置页文案会回退')
 }
 
+// ------------------------------------------------- 本地 ZIP 安装路径（隔离 profile）
+
+section('本地 ZIP 安装脚本（隔离 profile，不修改真实 DSH）')
+// 测试目录在 .workbuddy-ai 下：installer 复制源码时跳过它，避免把测试目录复制进自身。
+const testRoot = join(ROOT, '.workbuddy-ai')
+mkdirSync(testRoot, { recursive: true })
+const testHome = mkdtempSync(join(testRoot, 'check-install-'))
+const testProfile = join(testHome, 'profiles', 'desktop')
+const testLink = join(testProfile, 'node_modules', pkg.name)
+const testCopy = join(testHome, 'donevoice', 'plugin')
+const testEnv = { ...process.env, DSH_HOME: testHome }
+const installScript = join(ROOT, 'install.mjs')
+const runInstall = (...args) => execFileSync(process.execPath, [installScript, '--profile', testProfile, ...args], {
+  cwd: ROOT,
+  env: testEnv,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+  timeout: 20_000,
+})
+const samePath = (left, right) => {
+  const normalize = (path) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path)
+  return normalize(left) === normalize(right)
+}
+try {
+  mkdirSync(testProfile, { recursive: true })
+  writeFileSync(join(testProfile, 'package.json'), JSON.stringify({
+    name: 'donevoice-install-check',
+    private: true,
+    dependencies: {},
+    dsh: { profile: { bundles: [] } },
+  }))
+  runInstall('--apply')
+  const installed = JSON.parse(readFileSync(join(testProfile, 'package.json'), 'utf8'))
+  if (!lstatSync(testLink).isSymbolicLink() || !samePath(realpathSync(testLink), testCopy)
+    || !installed.dsh.profile.bundles.includes(pkg.name)
+    || !installed.dependencies[pkg.name]?.startsWith('link:')) {
+    throw new Error('复制模式未写好链接 / dependencies / bundles')
+  }
+  ok('默认复制安装', '<DSH_HOME>/donevoice/plugin + profile/node_modules 链接')
+
+  runInstall('--link', '--apply')
+  if (!samePath(realpathSync(testLink), ROOT)) throw new Error('--link 模式未指向源码目录')
+  runInstall('--apply')
+  if (!samePath(realpathSync(testLink), testCopy)) throw new Error('切回复制模式时旧链接没有重新指向副本')
+  if (existsSync(join(testCopy, '.workbuddy-ai'))) throw new Error('把 .workbuddy-ai 工作数据复制到了插件副本')
+  ok('切换安装模式', '--link ↔ 默认复制，且不复制工作数据')
+
+  runInstall('--uninstall', '--apply')
+  const cleaned = JSON.parse(readFileSync(join(testProfile, 'package.json'), 'utf8'))
+  if (existsSync(testLink) || cleaned.dependencies[pkg.name] || cleaned.dsh.profile.bundles.includes(pkg.name)) {
+    throw new Error('卸载后 profile 仍有插件残留')
+  }
+  ok('隔离卸载', 'profile 依赖与链接均已清除')
+} catch (error) {
+  fail('本地 ZIP 安装脚本', `${error.message.split('\n')[0]}${error.stderr ? `；${String(error.stderr).trim().split('\n').slice(-1)[0]}` : ''}`)
+} finally {
+  // 若测试中断在 --link 模式，先摘掉 junction，绝不递归进入它指向的源码目录。
+  try {
+    const kind = lstatSync(testLink)
+    if (!kind.isSymbolicLink()) throw new Error(`隔离目录里有非链接条目：${testLink}`)
+    try { unlinkSync(testLink) } catch { rmdirSync(testLink) }
+  } catch (error) {
+    if (error.code !== 'ENOENT') fail('清理测试链接', String(error))
+  }
+  try {
+    lstatSync(testLink) // 有残留时禁止递归清理测试目录，避免跟随链接损伤源码。
+    fail('清理测试目录', `链接仍存在，保留隔离目录：${testHome}`)
+  } catch (error) {
+    if (error.code === 'ENOENT') rmSync(testHome, { recursive: true, force: true })
+    else fail('清理测试目录', String(error))
+  }
+}
+
 // ---------------------------------------------------------------- 结论
 
 console.log('')
@@ -251,7 +324,7 @@ if (notes.length > 0) {
 }
 
 if (failures.length === 0) {
-  console.log(`\u2713 自检通过：${pkg.name}@${pkg.version} 可以从 GitHub 直接安装`)
+  console.log(`\u2713 自检通过：${pkg.name}@${pkg.version} 包结构与本地复制安装正常（GitHub 网络及 DSH 实际启动须另验）`)
   process.exit(0)
 }
 

@@ -65,14 +65,17 @@
 | **仅 Windows 10 / 11** | 系统通知走 Windows 通知中心、音效走 WPF、点击回跳走 AUMID 快捷方式 + `donevoice://` 协议——都是 Windows 专有。**macOS / Linux 上装了不会有任何反应** |
 | **DSH 桌面版 0.2.0-rc.2** | 开发与验证都在这个版本上。换别的 DSH 版本可能因接口变化而失效 |
 | **无需管理员权限** | 安装只动你自己的 profile 目录；首次运行时创建的开始菜单快捷方式与协议注册都写在 `HKCU` / `%APPDATA%` |
-| **无需联网** | 插件不访问任何网络，音效也随插件自带 |
-| 无需 Node（可选） | 只有命令行安装脚本需要 Node ≥ 20；没装也可以用 DSH 自带的运行时，见下 |
+| **运行时无需联网；从 GitHub 安装时需要联网** | 插件本身不访问外网，音效随包自带；首次从 GitHub 下载需要能访问 GitHub，离线安装见方式 C |
+| 无需单独安装 Node（可选） | DSH 插件页安装不需要另装 Node；只有手动运行方式 C 的脚本才需要 Node ≥ 20（或使用 DSH 自带运行时） |
 
 ---
 
 ## 安装
 
-### 方式 A（推荐）：一行装完
+**安装到你自己的电脑，不是安装到作者的下载目录。** 在 Windows 10/11、DSH 桌面版 0.2.0-rc.2 上，从 GitHub 安装时，DSH 会自动把插件放到当前用户的 profile 中：
+`%USERPROFILE%\.dsh\profiles\<profile>\node_modules\dsh-donevoice\`（使用自定义 `DSH_HOME` 的人则在 `<DSH_HOME>\profiles\<profile>\node_modules\`）。运行时配置和导入音效存到同一个 DSH home 下的 `donevoice\`；不需要指定作者的电脑路径，也无需管理员权限。**需要能访问 GitHub** 才能从 GitHub 安装；Windows 以外的平台不支持本插件的系统通知功能。
+
+### 方式 A（推荐）：在 DSH 插件页安装发布版
 
 1. 打开 DSH → **设置 → 插件 → 添加插件**
 2. 把这行粘进去：
@@ -83,9 +86,9 @@
 
 3. 确认安装 → **重启 DSH** → 打开 **设置 → 提醒 → 总开关**
 
-> **`#` 后面那串别删。** 它是版本号，带上才能锁死一个发布版；不写会跟着 main 的最新提交跑，
-> 那是「随时可能变的开发版」，出了问题和文档对不上。
-> 这个入口也认**本地目录的绝对路径**（例如 `D:\AppMaker\DSH-Creation\DoneVoice\dsh-donevoice`）。
+> **`#` 后面的版本号别删。** 这会把安装锁定到对应的发布 tag；不写则跟随随时可能变化的 main。当前发布版的安装不运行仓库里的 `install.mjs`：下载、写入 profile 和启用 bundle 都由 DSH 内置插件管理器负责。
+>
+> 若安装页报「连接 GitHub 超时」，这是安装前的网络探活（默认 5 秒），**不是**插件被装到错误目录；可检查代理与网络，或按下方方式 C 用下载的源码在本机复制安装。
 
 ### 方式 B：命令行
 
@@ -98,14 +101,16 @@ profile 不叫 `desktop` 就换成你自己的（`<DSH_HOME>/profiles/` 下的�
 
 ### 方式 C：离线 / 开发用脚本（可控、可预演、可回滚）
 
-**没网、或者正在改这个插件本身**时才用。日常安装走方式 A 就行——DSH 内置的插件管理器
-做的是同一件事，不用你手动碰 profile。
+**没网、GitHub 探活超时，或者正在改这个插件本身**时才用。先下载 GitHub 仓库 ZIP 并解压，找到**内层含 `package.json` 和 `install.mjs` 的文件夹**；ZIP 外层目录不能当作插件根目录。脚本默认把插件复制到当前用户的 DSH home 下，不依赖作者的文件路径；与方式 A 的落点不同，但都在当前用户自己的 `.dsh` 里。
 
 ```powershell
-cd <你放这个插件的目录>\dsh-donevoice
+# 改成你自己解压后的「内层插件目录」（其中应能看到 package.json）
+cd "C:\path\to\dsh-donevoice-main"
 node install.mjs            # 预演：只打印要动哪几个文件，不写盘
 node install.mjs --apply    # 确认后执行（复制到 .dsh + 备份 profile 的 package.json）
 ```
+
+> 方式 C 是**复制安装**，可在安装完成后移走下载的 ZIP/解压目录；不要在 DSH 插件页直接粘贴上述本地路径来代替方式 C——本地路径安装通常引用解压目录，之后移动/删除它可能导致插件失效。目前 GitHub 上的 `v1.1.1` **原版 ZIP** 中，脚本存在 `linkExists` 未定义的问题；使用方式 C 前，需拿到修复后的脚本或等待下一版发布（已在本地修好的副本不受影响）。方式 A 不调用此脚本，不受此问题影响。
 
 没装 Node 也能跑（两条都实测可用）：
 
@@ -120,7 +125,7 @@ $env:ELECTRON_RUN_AS_NODE = 1
 
 脚本只做三件事，件件可逆，且**不动 profile 自己的 `cordis.patch.yml`**：
 
-1. **把插件复制到 `<你的 DSH home>\donevoice\plugin\`**（默认就是 `C:\Users\<你>\.dsh\donevoice\plugin\`，和从 npm / GitHub 装的其它插件一样，都在 `.dsh` 里）
+1. **把插件复制到 `<你的 DSH home>\donevoice\plugin\`**（默认是 `%USERPROFILE%\.dsh\donevoice\plugin\`；从 GitHub 装则是该 DSH home 下的 `profiles\<profile>\node_modules\dsh-donevoice\`，两条路径不同）
 2. profile 的 `package.json` 加一条 `"dsh-donevoice": "link:<上一步那份副本>"`
 3. `dsh.profile.bundles` 追加 `"dsh-donevoice"`，并在 `node_modules/` 下建一条指向**副本**的链接
 
@@ -141,7 +146,7 @@ $env:ELECTRON_RUN_AS_NODE = 1
 
 | DoneVoice | 对应 DSH | 说明 |
 |---|---|---|
-| **1.1.0** | 0.2.0-rc.2 | 当前版本。安装规格：`github:zywnb-2/dsh-donevoice#v1.1.1` |
+| **1.1.1** | 0.2.0-rc.2 | 当前已发布的 GitHub 版本。安装规格：`github:zywnb-2/dsh-donevoice#v1.1.1`；从 ZIP 手动运行脚本需等修复版发布 |
 
 DSH 的插件入口**没有自动更新**。升级就是换一个 tag：
 
