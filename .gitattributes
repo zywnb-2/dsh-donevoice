@@ -13,5 +13,7 @@
 *.aac binary
 
 # 图标与 patch 文件要逐字节可复现。
+*.png binary
+*.jpg binary
 *.svg text eol=lf
 cordis.patch.yml text eol=lf

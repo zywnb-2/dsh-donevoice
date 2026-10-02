@@ -162,6 +162,31 @@ if (readme.includes(`| **${pkg.version}** |`)) {
   )
 }
 
+// 站内锚点：改写标题会让 `](#旧锚点)` **静默**失效——渲染出来照常是个链接，点了没反应。
+// 真踩过：把「方式 A（推荐）：一行装完」改成别的标题后，「怎么升级」里的链接就指空了。
+// 按 GitHub 的 slug 规则（小写、去掉标点、空格转连字符）校验一遍。
+const slug = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/\s+/g, '-')
+const headings = new Set([...readme.matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) => slug(m[1])))
+const anchors = [...readme.matchAll(/\]\(#([^)]+)\)/g)].map((m) => m[1])
+const deadAnchors = anchors.filter((anchor) => !headings.has(anchor))
+if (deadAnchors.length === 0) {
+  ok('README 站内锚点', `${anchors.length} 个全部有效`)
+} else {
+  fail('README 站内锚点失效', `${deadAnchors.join('、')}；标题被改过就会这样，链接要跟着改`)
+}
+
+// README 里的本地图片：路径写错在 GitHub 上只是「图裂」，不报错，很容易一直没人发现。
+// 只校验相对路径（外链跳过），并剥掉可能存在的 #anchor。
+const images = [...readme.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)]
+  .map((m) => m[1].trim())
+  .filter((src) => !/^(?:https?:)?\/\//i.test(src))
+const missingImages = images.filter((src) => !existsSync(join(ROOT, src.replace(/^\.\//, '').split('#')[0])))
+if (missingImages.length === 0) {
+  ok('README 图片', images.length > 0 ? `${images.length} 个本地图片都在` : '无本地图片引用')
+} else {
+  fail('README 图片路径失效', `${missingImages.join('、')}；在 GitHub 上会显示成图裂`)
+}
+
 // ---------------------------------------------------------------- exports
 
 section('exports 契约')
