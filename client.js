@@ -76,7 +76,7 @@ window.__ModuleLoader__.load({
     /** 宿主 Loader 条目 id：同时是设置页槽位 id 与配置路由的归属名。必须与 cordis.patch.yml 一致。 */
     const HOST_ENTRY_ID = 'donevoice'
     /** 版本（与 package.json / 宿主半区对齐，由 test/validate.mjs 钉住）。 */
-    const VERSION = '1.1.0'
+    const VERSION = '1.1.1'
     /**
      * 客户端构建标记：**每改一次 client.js 就加一**，并显示在设置页「诊断」第一行。
      *
