@@ -18,7 +18,7 @@
  * 说明：--apply 只做本地提交与打标签；推送要再加 --push，因为推上去之后
  * 用户就能装到这一版了，值得单独确认一次。
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,6 +30,9 @@ const CLIENT_JS = join(ROOT, 'client.js')
 const README = join(ROOT, 'README.md')
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 
+/** 仓库地址，用来拼 Release 链接。改 remote 时记得一起改这里。 */
+const REPO = 'zywnb-2/dsh-donevoice'
+
 function git(args, { quiet = false } = {}) {
   return execFileSync('git', args, {
     cwd: ROOT,
@@ -40,6 +43,51 @@ function git(args, { quiet = false } = {}) {
 
 function node(args) {
   execFileSync(process.execPath, args, { cwd: ROOT, stdio: 'inherit' })
+}
+
+/**
+ * 推送一个 ref，并在**读不到凭据**时自动补救。
+ *
+ * 为什么需要这段：`git push` 需要一个能给出凭据的 credential helper。在非交互环境里
+ * （CI、脚本、没有 TTY 的终端）git 无法弹窗，只能报
+ *
+ *     fatal: could not read Username for 'https://github.com': terminal prompts disabled
+ *
+ * 而 Windows 上凭据其实**已经在 Credential Manager 里了**——只是 `~/.gitconfig` 里的
+ * `credential.helper=` 被清空（PortableGit 的 helper-selector 选过「no helper」就会这样），
+ * 于是没人去取。所以这里显式挂上 wincred 再试一次。凭据本身不会被打印出来。
+ *
+ * 真机踩过：一次发版里 `git push origin main` 成功、紧接着 `git push origin v1.1.1` 失败，
+ * 脚本当场抛栈退出，标签留在本地没推上去——用户装到的还是旧版。
+ * @param ref 分支名或标签名。
+ * @returns 推送成功返回 true。
+ * @throws 两次都失败时抛出（调用方负责给出人话）。
+ */
+function pushRef(ref) {
+  const first = spawnSync('git', ['push', 'origin', ref], { cwd: ROOT, encoding: 'utf8' })
+  if (first.status === 0) {
+    process.stdout.write(first.stderr ?? '')
+    return true
+  }
+  const text = `${first.stdout ?? ''}${first.stderr ?? ''}`
+  if (!/could not read Username|terminal prompts disabled|Authentication failed|403/i.test(text)) {
+    process.stderr.write(text)
+    throw new Error(`git push origin ${ref} 失败`)
+  }
+  console.log(`  第一次推送没拿到凭据（非交互环境），改用 Windows 凭据管理器重试：${ref}`)
+  const second = spawnSync('git', ['-c', 'credential.helper=wincred', 'push', 'origin', ref], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  })
+  if (second.status === 0) {
+    process.stdout.write(second.stderr ?? '')
+    return true
+  }
+  process.stderr.write(`${second.stdout ?? ''}${second.stderr ?? ''}`)
+  throw new Error(
+    `非交互环境读不到 GitHub 凭据，标签 ${ref} 没能推上去。`
+      + `提交和标签都在本地，不会丢；在**你自己的终端**里跑这一行即可：git push origin ${ref}`,
+  )
 }
 
 function parseArgs(argv) {
@@ -196,26 +244,41 @@ git(['tag', '-a', tag, '-m', `${pkg.name} ${tag}`])
 
 if (args.push) {
   console.log('\n→ 推送')
-  git(['push', 'origin', branch])
-  git(['push', 'origin', tag])
-  console.log(`
-已推送。还差最后一步——在 GitHub 上建一个 Release：
+  let tagPushed = true
+  pushRef(branch)
+  try {
+    pushRef(tag)
+  } catch (error) {
+    // 不在这里抛栈退出：分支已经推上去了，此时崩掉只会让人以为"整个发版失败"，
+    // 而真正要记住的是"标签还没推，用户装到的还是旧版"。
+    tagPushed = false
+    console.error(`\n⚠️  分支推上去了，但标签 ${tag} 没推上去。`)
+    console.error(`   ${error instanceof Error ? error.message : error}`)
+  }
 
-  1. 打开 https://github.com/zywnb-2/dsh-donevoice/releases/new?tag=${tag}
-  2. 标题填 ${tag}，正文从 CHANGELOG.md 里复制「## ${target}」那一节
-  3. 发布
+  if (tagPushed) {
+    console.log(`
+已推送。用户现在就能用这一行装到新版：
 
-Release 建好之后，用户就能用这一行装到新版：
+  github:${REPO}#${tag}
 
-  github:zywnb-2/dsh-donevoice#${tag}
+还差最后一步——建一个 Release。tag 已经够安装用了，Release 页面是给用户看
+「这版改了什么」的地方，也是 GitHub 通知关注者的渠道：
 
-（Release 本身不是安装的必要条件——tag 存在就够了；但 Release 页面是
-用户看「这版改了什么」的地方，也是 GitHub 通知关注者的渠道。）`)
+  1. 打开 https://github.com/${REPO}/releases/new?tag=${tag}
+  2. 标题填 ${tag}，正文从 CHANGELOG.md 复制「## ${target}」那一节
+  3. 发布`)
+  } else {
+    console.log(`
+⚠️  远端还只有旧标签，用户暂时装不到 ${tag}。把标签推上去之后再建 Release：
+
+  https://github.com/${REPO}/releases/new?tag=${tag}`)
+  }
 } else {
   console.log(`
 本地已完成（提交 + 标签），还没推。推送：
 
   git push origin ${branch} && git push origin ${tag}
 
-推完再去建 Release：https://github.com/zywnb-2/dsh-donevoice/releases/new?tag=${tag}`)
+推完再去建 Release：https://github.com/${REPO}/releases/new?tag=${tag}`)
 }
