@@ -31,11 +31,11 @@
 **1. 安装** —— DSH → **设置 → 插件 → 添加插件**，粘这一行：
 
 ```
-github:zywnb-2/dsh-donevoice#v1.1.2
+github:zywnb-2/dsh-donevoice#v1.1.3
 ```
 
 > **`#` 后面的版本号别删**，它把安装锁定到对应的发布 tag；不写就跟随随时会变的 `main`。
-> 命令行等价写法：`dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.1.2`
+> 命令行等价写法：`dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.1.3`
 
 **2. 重启 DSH** —— 新的插件代码要重启才会加载。
 
@@ -53,7 +53,7 @@ github:zywnb-2/dsh-donevoice#v1.1.2
 
 | DoneVoice | 对应 DSH | 安装规格 |
 |---|---|---|
-| **1.1.2** | 0.2.0-rc.2 | `github:zywnb-2/dsh-donevoice#v1.1.2` |
+| **1.1.3** | 0.2.0-rc.2 | `github:zywnb-2/dsh-donevoice#v1.1.3` |
 
 DSH 的插件入口**没有自动更新**：在插件页卸载旧版 → 装新版（只改 `#` 后面那串）→ 重启 DSH。
 
