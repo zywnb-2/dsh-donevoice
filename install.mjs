@@ -26,7 +26,7 @@
  * 卸载是精确可逆的：只删本插件自己加的那一条依赖、那一个 bundles 项、那一个 junction，
  * 其余内容原样保留，并且每次写盘前都会先备份 package.json。
  */
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -224,6 +224,11 @@ function removeLink(path) {
 
 /**
  * 解析链接当前指向哪里（拿不到就返回 null）。
+ *
+ * ⚠️ **返回 null 不代表"没有链接"**：断链（目标已被删掉）也会返回 null。
+ * 判断"有没有东西在那儿"必须用 `entryKind`，不能用 `existsSync`——
+ * `existsSync` 会跟着链接去解析，目标不存在就返回 false，
+ * 于是"断链"和"什么都没有"被混成同一种，见 `entryKind` 的注释。
  * @param path 链接路径。
  * @returns 规范化后的绝对路径或 null。
  */
@@ -232,6 +237,46 @@ function linkTargetOf(path) {
     return resolve(realpathSync(path))
   } catch {
     return null
+  }
+}
+
+/**
+ * 看清 `path` 位置上**实际存在的是什么**，不跟随链接去解析目标。
+ *
+ * ⚠️ 这里必须用 `lstat`，不能用 `existsSync`。真机事故：
+ * `install.mjs` 早先把插件复制到 `<DSH_HOME>/donevoice/plugin/` 并让 profile 指向那份副本；
+ * 后来那份副本被删掉了，`node_modules/dsh-donevoice` 就成了一条**断链**。
+ * 而 `existsSync` 对断链返回 `false` ⇒ 卸载计划里写的是「（不存在）」⇒ 谁都不去清它。
+ * 后果是用户从 DSH 插件页装 GitHub 版时，pnpm 走到最后一步报：
+ *
+ *     [ERR_PNPM_EPERM] rename 'node_modules/dsh-donevoice_tmp_1_1' -> 'node_modules/dsh-donevoice'
+ *
+ * 界面上显示成「没有写入权限，无法安装」——一条断链伪装成了权限问题。
+ * @param path 待探测的路径。
+ * @returns `'link'` 符号链接/junction（含断链）、`'dir'` 普通目录、`'file'` 其它条目、`'missing'` 什么都没有。
+ */
+function entryKind(path) {
+  try {
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink()) return 'link'
+    if (stat.isDirectory()) return 'dir'
+    return 'file'
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing'
+    return 'file'
+  }
+}
+
+/**
+ * 读出链接**自己写的**目标路径（断链也读得到，`linkTargetOf` 读不到）。
+ * @param path 链接路径。
+ * @returns 原始目标字符串，读不到就返回 `'(读不到)'`。
+ */
+function rawLinkTarget(path) {
+  try {
+    return readlinkSync(path)
+  } catch {
+    return '(读不到)'
   }
 }
 
@@ -291,25 +336,45 @@ function install(options) {
 
   const wantTarget = copyMode ? copyDir : PLUGIN_DIR
   let needsLink = false
-  const linkExists = existsSync(linkPath)
-  if (linkExists) {
-    const stat = lstatSync(linkPath)
-    if (stat.isSymbolicLink() !== true && stat.isDirectory() !== true) {
-      problems.push('目标已存在且不是目录/链接，拒绝覆盖：' + linkPath)
-    } else {
-      // 已存在也要看**指向对不对**：在复制模式与 --link 模式之间切换时必须重新指向，
-      // 否则会出现"文件复制进 .dsh 了，链接却还指着源码目录"的假象（第一版就漏了这点）。
-      const current = linkTargetOf(linkPath)
-      if (current !== null && current.toLowerCase() !== resolve(wantTarget).toLowerCase()) {
-        steps.push({ kind: 'relink', text: '重新指向：' + linkPath + '\n          现在指向 ' + current + '\n          改为    ' + wantTarget })
-        needsLink = true
-      } else {
-        steps.push({ kind: 'skip', text: 'node_modules/' + PACKAGE_NAME + ' 已指向 ' + wantTarget })
-      }
-    }
-  } else {
+  const linkKind = entryKind(linkPath)
+  if (linkKind === 'missing') {
     steps.push({ kind: 'link', text: '建立链接：' + linkPath + '  →  ' + wantTarget })
     needsLink = true
+  } else if (linkKind === 'link') {
+    const current = linkTargetOf(linkPath)
+    if (current === null) {
+      // 断链：链接还在，目标没了。留着它会让 DSH 插件页装 GitHub 版时报
+      // [ERR_PNPM_EPERM]（pnpm 无法把临时目录 rename 成一个已存在的名字），
+      // 界面上显示成「没有写入权限，无法安装」——一个纯粹的假象。必须摘掉。
+      steps.push({
+        kind: 'relink',
+        text: '清掉断链：' + linkPath
+          + '\n          它指向 ' + rawLinkTarget(linkPath) + '，而那里已经没有东西了'
+          + '\n          留着它会让 DSH 插件页报「没有写入权限，无法安装」',
+      })
+      needsLink = true
+    } else if (current.toLowerCase() !== resolve(wantTarget).toLowerCase()) {
+      // 已存在也要看**指向对不对**：在复制模式与 --link 模式之间切换时必须重新指向，
+      // 否则会出现"文件复制进 .dsh 了，链接却还指着源码目录"的假象（第一版就漏了这点）。
+      steps.push({ kind: 'relink', text: '重新指向：' + linkPath + '\n          现在指向 ' + current + '\n          改为    ' + wantTarget })
+      needsLink = true
+    } else {
+      steps.push({ kind: 'skip', text: 'node_modules/' + PACKAGE_NAME + ' 已指向 ' + wantTarget })
+    }
+  } else if (linkKind === 'dir') {
+    if (resolve(linkPath).toLowerCase() === resolve(wantTarget).toLowerCase()) {
+      steps.push({ kind: 'skip', text: 'node_modules/' + PACKAGE_NAME + ' 就是 ' + wantTarget })
+    } else {
+      steps.push({
+        kind: 'relink',
+        text: '替换为链接：' + linkPath
+          + '\n          现在是一个普通目录（可能是从 npm / GitHub 装进来的）'
+          + '\n          改为指向 ' + wantTarget,
+      })
+      needsLink = true
+    }
+  } else {
+    problems.push('目标已存在且不是目录/链接，拒绝覆盖：' + linkPath)
   }
 
   console.log('== 安装计划 ==')
@@ -437,7 +502,11 @@ function uninstall(options) {
   const hasDependency = Object.prototype.hasOwnProperty.call(manifest.dependencies ?? {}, PACKAGE_NAME)
   const bundles = Array.isArray(manifest.dsh?.profile?.bundles) ? manifest.dsh.profile.bundles : []
   const hasBundle = bundles.includes(PACKAGE_NAME)
-  const hasLink = existsSync(linkPath)
+  const linkKind = entryKind(linkPath)
+  const hasLink = linkKind !== 'missing'
+  // 断链（链接还在、目标已删）必须按"要清理"处理：`existsSync` 会把它误判成"不存在"，
+  // 于是谁都不去清它，而它恰恰是唯一能挡住 pnpm 安装的东西。见 `entryKind` 的注释。
+  const linkIsDangling = linkKind === 'link' && linkTargetOf(linkPath) === null
   // 只删"看起来确实是我们那份副本"的目录（有 package.json 且 name 对得上），避免误删别人的东西。
   let hasCopy = false
   try {
@@ -451,7 +520,10 @@ function uninstall(options) {
   console.log('== 卸载计划 ==')
   console.log('  删除依赖项：' + (hasDependency ? '是' : '否（本来就是干净的）'))
   console.log('  删除 bundles 项：' + (hasBundle ? '是' : '否'))
-  console.log('  删除链接：' + linkPath + (hasLink ? '' : '（不存在）'))
+  console.log('  删除链接：' + linkPath
+    + (hasLink
+      ? (linkIsDangling ? '（断链：指向 ' + rawLinkTarget(linkPath) + '，目标已不存在——它会挡住 pnpm 安装）' : '')
+      : '（不存在）'))
   console.log('  删除 .dsh 里的副本：' + (hasCopy ? copyDir : '无（当前不是默认复制模式）'))
   console.log('  只动这几处，其余原样保留；**你的插件源码目录不会被碰**。')
 

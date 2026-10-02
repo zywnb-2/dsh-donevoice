@@ -27,6 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PACKAGE_JSON = join(ROOT, 'package.json')
 const INDEX_JS = join(ROOT, 'index.js')
 const CLIENT_JS = join(ROOT, 'client.js')
+const README = join(ROOT, 'README.md')
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 
 function git(args, { quiet = false } = {}) {
@@ -147,6 +148,7 @@ if (args.tagCurrent) {
   console.log(`  package.json   "version": "${current}" -> "${target}"`)
   console.log(`  index.js       export const version = '${current}' -> '${target}'`)
   console.log(`  client.js      const VERSION = '${current}' -> '${target}'`)
+  console.log(`  README.md      安装命令里的 #v${current} -> #v${target}`)
 }
 console.log('将要执行：')
 console.log(`  node scripts/check-package.mjs`)
@@ -173,6 +175,9 @@ if (!args.tagCurrent) {
   rewrite(PACKAGE_JSON, new RegExp(`"version": "${current}"`), `"version": "${target}"`)
   rewrite(INDEX_JS, new RegExp(`export const version = '${current}'`), `export const version = '${target}'`)
   rewrite(CLIENT_JS, new RegExp(`const VERSION = '${current}'`), `const VERSION = '${target}'`)
+  // README 的安装章节把 tag 写死在命令里，漏改就会让文档指着一个旧版本——
+  // 正是这份文档自己反复警告的「文档和实际装到的版本对不上」。全局替换所有 #v<旧>。
+  rewrite(README, new RegExp(`#v${current.replace(/\./g, '\\.')}\\b`, 'g'), `#v${target}`)
 }
 
 console.log('\n→ 自检')

@@ -133,6 +133,23 @@ if (distinct.length > 1) {
   fail('版本号不一致', `三处分别是 ${versionValues.map(([f, v]) => `${f}=${v}`).join('、')}；发版脚本会一起改，手改时别漏`)
 }
 
+// ------------------------------------------------- README 里的版本号
+
+section('README 安装命令的版本号')
+const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+const wanted = `#v${pkg.version}`
+if (readme.includes(wanted)) {
+  ok('README 指向当前版本', wanted)
+} else {
+  const found = [...new Set([...readme.matchAll(/#v(\d+\.\d+\.\d+)/g)].map((m) => m[0]))]
+  fail(
+    'README 指向的不是当前版本',
+    found.length > 0
+      ? `README 里是 ${found.join('、')}，当前版本是 ${wanted}；发版脚本会一起改，手改时别漏`
+      : `README 里找不到 ${wanted}，安装章节的 tag 可能被改坏了`,
+  )
+}
+
 // ---------------------------------------------------------------- exports
 
 section('exports 契约')
