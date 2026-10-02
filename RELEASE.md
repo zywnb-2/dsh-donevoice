@@ -123,7 +123,8 @@ node scripts/release.mjs --bump minor --apply --push
 
 ## 四、用户侧会看到的安装方式
 
-发完版之后，把这三行写进 README 和任何宣传材料里：
+**README 的「快速开始」只放一条主路径 + 一条命令行等价写法**（2026-10-02 精简：README 从
+17KB 砍到 3.5KB，下面那条离线脚本不再写进 README）。发完版把这两行同步进 README：
 
 **在 DSH 里装（推荐）** —— 设置 → 插件 → 添加插件，粘贴：
 
@@ -131,7 +132,7 @@ node scripts/release.mjs --bump minor --apply --push
 github:zywnb-2/dsh-donevoice#v1.2.0
 ```
 
-**命令行装**：
+**命令行等价写法**（在 README 里作为主路径下方的一句附注，不单开章节）：
 
 ```bash
 dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.2.0
@@ -139,16 +140,22 @@ dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.2.0
 
 （个别 DSH 版本不认 `add`，用 `install` 代替。）
 
-**离线 / 开发用**（用户先下载并解压 ZIP，在内层含 `package.json` 的目录执行；不走 GitHub 探活）：
+> ⚠️ **别把离线脚本那条写回 README。** 它只在用户**没网 / GitHub 探活超时 / 正在改插件本身**时
+> 才单独提供，不占 README 篇幅：让用户下载仓库 ZIP 并解压，在**内层含 `package.json` 的目录**
+> 执行 `node install.mjs`（预演）→ `node install.mjs --apply`（执行）。
+> 它把插件复制到该用户自己的 `<DSH_HOME>/donevoice/plugin`。
+>
+> 注意：GitHub 版与脚本复制版**都在各用户的 DSH home 下，但落点不同**；不要让用户在插件页
+> 输入作者电脑上的绝对路径——本地路径直接装通常链接解压目录，移走后可能失效。
+> GitHub 上的 `v1.1.1` 原版 ZIP 脚本有 `linkExists` 未定义的故障，**v1.1.2 起已修复**。
 
-```bash
-node install.mjs                # 先预演
-node install.mjs --apply        # 确认后复制到该用户自己的 <DSH_HOME>/donevoice/plugin
-```
+两种方式装完都要**重启 DSH**。
 
-注意：GitHub 版与脚本复制版**都在各用户的 DSH home 下，但落点不同**；不要让用户在插件页输入作者电脑上的绝对路径。本地路径直接装通常链接解压目录，移走后可能失效。GitHub 上的 `v1.1.1` 原版 ZIP 脚本有 `linkExists` 未定义的故障：下一个发布版本必须包含已修复的 `install.mjs`，否则不要把这条路当作公开的备用安装方案。
-
-三种方式装完都要**重启 DSH**。
+> **改 README 时，自检会拦这四条**（`scripts/check-package.mjs`，违反任何一条都发不了版）：
+> ① 必须含 `#v<当前版本>` 的安装规格；② 必须含一行 `| **<版本>** |` 的**版本对应表**——
+> 所以那张表不是装饰，删了发不出去；③ 所有 `](#锚点)` 必须对得上标题（删或改标题会让锚点
+> **静默**失效，渲染出来照常是个链接、点了没反应）；④ 所有 `![](./本地图片)` 路径必须真实存在
+> （删图要连引用一起删）。
 
 ---
 
