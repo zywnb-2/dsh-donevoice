@@ -35,10 +35,6 @@
     "locale/*.json",
     "README.md",
     "CHANGELOG.md",
-    "RELEASE.md",
-    "DEVELOPMENT.md",
-    "NATIVE.md",
-    "ARCHITECTURE.md",
     "LICENSE",
     "install.mjs"
   ],

@@ -25,7 +25,6 @@
 | `new03` | `new03.mp3` | `universfield-new-notification-03-323602.mp3` | Pixabay / universfield |
 | `positive` | `positive.mp3` | `universfield-positive-notification-351299.mp3` | Pixabay / universfield |
 | `system02` | `system02.mp3` | `universfield-system-notification-02-352442.mp3` | Pixabay / universfield |
-| `audiomass-output` | `audiomass-output.mp3` | `audiomass-output.mp3`（作者自制） | 仓库作者自制 |
 
 > Pixabay 内容许可：可免费用于商业与非商业用途、无需署名（此处署名是出于礼貌与可追溯）。
 > 若要替换成自己的音效：把文件放进本目录，在 `win-native.js` 的 `SOUND_PRESETS`
