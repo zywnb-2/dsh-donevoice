@@ -72,20 +72,34 @@
 
 ## 安装
 
-### 方式 A（推荐）：在 DSH 里直接装
+### 方式 A（推荐）：一行装完
 
-1. 打开 DSH → **设置 → 内置插件 → 添加插件**
-2. 把仓库地址粘进去：
+1. 打开 DSH → **设置 → 插件 → 添加插件**
+2. 把这行粘进去：
 
    ```
-   https://github.com/zywnb-2/dsh-donevoice
+   github:zywnb-2/dsh-donevoice#v1.1.0
    ```
 
-3. 确认安装 → **重启 DSH**
+3. 确认安装 → **重启 DSH** → 打开 **设置 → 提醒 → 总开关**
 
-> 该入口也支持**本地目录路径**：把仓库下载到本地后，直接填那个文件夹的路径即可（例如 `C:\Users\你\dsh-donevoice`）。
+> **`#` 后面那串别删。** 它是版本号，带上才能锁死一个发布版；不写会跟着 main 的最新提交跑，
+> 那是「随时可能变的开发版」，出了问题和文档对不上。
+> 这个入口也认**本地目录的绝对路径**（例如 `D:\AppMaker\DSH-Creation\DoneVoice\dsh-donevoice`）。
 
-### 方式 B：命令行安装（可控、可预演、可回滚）
+### 方式 B：命令行
+
+```bash
+dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.1.0
+```
+
+profile 不叫 `desktop` 就换成你自己的（`<DSH_HOME>/profiles/` 下的目录名）。
+装完同样要重启 DSH。（你的 DSH 版本不认 `add` 的话，用 `install` 代替。）
+
+### 方式 C：离线 / 开发用脚本（可控、可预演、可回滚）
+
+**没网、或者正在改这个插件本身**时才用。日常安装走方式 A 就行——DSH 内置的插件管理器
+做的是同一件事，不用你手动碰 profile。
 
 ```powershell
 cd <你放这个插件的目录>\dsh-donevoice
@@ -119,12 +133,27 @@ $env:ELECTRON_RUN_AS_NODE = 1
 > ```
 > 两种模式可以随时互相切换，脚本会自动把链接**重新指向**正确位置。
 
-> ⚠️ **换安装方式前先卸载旧方式**：如果你先前用**本地目录 / `--link`** 装过，请先
-> `node install.mjs --uninstall --apply`，再换成上面的 GitHub 入口安装——否则卸载旧版时可能把那个目录里的文件一起删掉。
-
 每次写盘前都会把 profile 的 `package.json` 备份成 `package.json.donevoice-backup-<时间戳>.json`（不会自动清理，可手动删）。
 
 **装完必须重启 DSH 桌面进程**（新的插件代码要重启才会被加载）。
+
+### 版本对应与升级
+
+| DoneVoice | 对应 DSH | 说明 |
+|---|---|---|
+| **1.1.0** | 0.2.0-rc.2 | 当前版本。安装规格：`github:zywnb-2/dsh-donevoice#v1.1.0` |
+
+DSH 的插件入口**没有自动更新**。升级就是换一个 tag：
+
+1. 在插件页**卸载**旧版
+2. 按方式 A 装新版（只改 `#` 后面那串）
+3. **重启 DSH**
+
+完整更新记录见 [CHANGELOG.md](./CHANGELOG.md)。
+
+> ⚠️ **换安装方式前先卸载旧方式**。如果你先前用**本地目录 / `--link`** 装过（方式 C），
+> 请先 `node install.mjs --uninstall --apply`，再改成方式 A——否则卸载旧版时可能把那个
+> 目录里的文件一起删掉。
 
 ---
 
@@ -186,7 +215,7 @@ $env:ELECTRON_RUN_AS_NODE = 1
 可以。安装脚本会自己找 profile；`DSH_HOME` 环境变量优先，也可以用 `node install.mjs --profile "<你的 profile 目录>"` 显式指定。
 
 **Q：怎么升级？**
-目前 DSH 的插件入口**不支持自动更新**：先卸载旧版，再装新版，然后重启 DSH。
+DSH 的插件入口**没有自动更新**：在插件页卸载旧版 → 按[方式 A](#方式-a推荐一行装完)装新版（只改 `#` 后面那个版本号）→ 重启 DSH。每版改了什么见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -240,6 +269,8 @@ node install.mjs --uninstall --apply    # 确认后执行（同样会先备份 p
 
 | 文档 | 内容 |
 |---|---|
+| [CHANGELOG.md](./CHANGELOG.md) | 每版改了什么（用户视角） |
+| [RELEASE.md](./RELEASE.md) | 发版与上架：DSH 怎么装 GitHub 插件、仓库要满足什么、怎么打 tag 发新版 |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | 工程视角：设计取舍、视觉规范、提示音规范、**三个真机踩坑**、开发与验收方法、目录结构、真机验收清单 |
 | [NATIVE.md](./NATIVE.md) | 原生通知子系统：为什么能弹到 DSH 外面、真机数字、30 秒自证方法 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 契约文档：宿主事实、数据流、不变量、踩坑记录 |

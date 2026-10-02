@@ -1,0 +1,61 @@
+name: 反馈问题
+description: 装了没反应、点通知没跳回来、音效不对……按这份表单填，能一次定位。
+title: '[Bug] '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        填之前先确认三件事，能省一轮来回：
+
+        1. **「总开关」开了吗？** 设置 → 提醒 → 总开关。它是**默认关**的。
+        2. **重启过 DSH 吗？** 插件代码要重启桌面进程才会加载。
+        3. **当时你正看着 DSH 窗口吗？** 按设计，在页面上时是安静的；切到别的窗口才会弹系统通知。
+
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      description: 设置 → 关于，或桌面版左上角版本入口。
+      placeholder: 0.2.0-rc.2
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: DoneVoice 版本
+      description: 插件页里显示的版本，或安装时用的 tag。
+      placeholder: 1.1.0（github:zywnb-2/dsh-donevoice#v1.1.0）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-way
+    attributes:
+      label: 安装方式
+      options:
+        - DSH 插件页（填 github: 地址）
+        - 命令行 dsh plugin add
+        - install.mjs 脚本（离线 / 开发）
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 现象
+      description: 你期待发生什么、实际发生了什么。有通知截图更好。
+    validations:
+      required: true
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: 探针输出
+      description: |
+        打开 http://127.0.0.1:<端口>/plugins/dsh-donevoice/health.json（端口就是 DSH 启动时打印的那个），
+        把返回的 JSON 贴在这里。它会告诉你宿主活着没、五条路由齐没齐、音效与总开关什么状态。
+      render: json
+    validations:
+      required: false

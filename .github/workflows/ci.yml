@@ -1,0 +1,50 @@
+name: CI
+
+# 这个工作流只回答一个问题：**用户从 GitHub 装得下来吗？**
+# 语法、package.json 契约、files 覆盖、有没有会挡住 pnpm 的构建脚本——全在
+# scripts/check-package.mjs 里，这里只负责在多平台上把它跑起来。
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'RELEASE.md'
+      - 'CHANGELOG.md'
+      - 'docs/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 打包自检 (${{ matrix.os }} / node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 语法检查（宿主与浏览器半区）
+        shell: bash
+        run: |
+          for file in index.js host-config.js host-sensors.js win-native.js client.js install.mjs; do
+            node --check "$file"
+            echo "ok  $file"
+          done
+
+      - name: 发布自检
+        run: node scripts/check-package.mjs

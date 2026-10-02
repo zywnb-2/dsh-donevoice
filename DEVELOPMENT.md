@@ -15,6 +15,7 @@
 - [三个必须知道的坑](#三个必须知道的坑)
 - [开发与验收](#开发与验收)
 - [目录结构](#目录结构)
+- [发版](#发版)
 - [真机验收清单](#真机验收清单)
 - [许可与出处](#许可与出处)
 
@@ -239,10 +240,16 @@ dsh-donevoice/
 ├─ cordis.patch.yml     把宿主条目 donevoice 插入 profile
 ├─ package.json         dsh.bundle.patch + dsh.client.platform=web
 ├─ install.mjs          安装/卸载（默认**复制到 .dsh**、可逆、profile 自动定位；`--link` 开发直连）
+├─ scripts/
+│  ├─ check-package.mjs 发布自检：字段 / patch id / 版本号三处一致 / files 覆盖 / 无构建脚本（CI 也跑它）
+│  └─ release.mjs       发版：三处版本号一起改 → 自检 → 提交 → 打 tag → 推送（默认预演）
+├─ .github/workflows/   CI：ubuntu + windows × node 20/22 跑上面那个自检
 ├─ locale/{zh,en}.json  插件文案
 ├─ icon.svg
 ├─ LICENSE              MIT
 ├─ README.md            面向使用者：安装 / 使用 / 常见问题
+├─ CHANGELOG.md         每版改了什么（用户视角）
+├─ RELEASE.md           发版与上架：DSH 怎么装 GitHub 插件、仓库要满足什么、怎么打 tag
 ├─ DEVELOPMENT.md       本文件：开发视角
 ├─ NATIVE.md            原生通知子系统：为什么能弹到 DSH 外面、真机数字、自证方法
 └─ ARCHITECTURE.md      契约文档：宿主事实 / 数据流 / 不变量 / 踩坑
@@ -251,6 +258,25 @@ dsh-donevoice/
 > 目录里**只有运行时文件与文档**：出问题的排查过程、审计报告、离线测试套件、验收/诊断脚本都已清掉
 > （先后删掉 `test/` 249 KB、`evidence/` 1047 KB、旧插件源码 103 KB、`tools/` 29 KB，以及 `win-native.js` 里
 > 120 行的自检 CLI）。`npm pack --dry-run` 可核对随包发布的文件。
+
+---
+
+## 发版
+
+改完代码、写完 `CHANGELOG.md` 里对应那一节之后：
+
+```bash
+node scripts/check-package.mjs              # 先自己过一遍自检
+node scripts/release.mjs --bump patch       # 预演：1.1.0 -> 1.1.1，只打印要改什么
+node scripts/release.mjs --bump patch --apply --push
+```
+
+发版脚本存在的唯一理由是：**版本号必须三处一致**——`package.json`、`index.js` 的
+`export const version`、`client.js` 的 `const VERSION`。这是 `ARCHITECTURE.md` 里写死的契约，
+手改三次一定会漏一次。脚本一起改，`check-package.mjs` 再验一遍。
+
+完整的发版与上架流程（包括「DSH 到底怎么装一个 GitHub 插件」「仓库要满足哪些条件」）
+见 [RELEASE.md](./RELEASE.md)。
 
 ---
 

@@ -1,0 +1,9 @@
+# 让 Git 别把二进制提示音当成文本处理（避免换行符被改写、diff 变成噪音）。
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.wma binary
+*.aac binary
+
+# 图标是文本，但要保证各处取到同一份字节。
+*.svg text eol=lf

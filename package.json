@@ -4,8 +4,17 @@
   "type": "module",
   "license": "MIT",
   "description": "DoneVoice：DeepSeek Harness 的完成/审批/提问/失败提醒——由宿主进程弹 Windows 系统通知（带彩色图标与内置提示音），不依赖任何页面。",
+  "author": {
+    "name": "zyw",
+    "url": "https://github.com/zywnb-2"
+  },
   "icon": "./icon.svg",
   "main": "index.js",
+  "scripts": {
+    "check": "node scripts/check-package.mjs",
+    "test": "node scripts/check-package.mjs",
+    "release": "node scripts/release.mjs"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -25,6 +34,8 @@
     "sounds/SOURCES.md",
     "locale/*.json",
     "README.md",
+    "CHANGELOG.md",
+    "RELEASE.md",
     "DEVELOPMENT.md",
     "NATIVE.md",
     "ARCHITECTURE.md",
@@ -32,6 +43,7 @@
     "install.mjs"
   ],
   "dsh": {
+    "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -59,7 +71,8 @@
     "desktop"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": "0.2.0-rc.2"
   },
   "repository": {
     "type": "git",

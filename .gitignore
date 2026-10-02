@@ -1,8 +1,14 @@
+# 依赖与打包产物
 node_modules/
 *.tgz
+
+# 本机与编辑器
 *.log
 *.tmp
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# AI 工作区（会话缓存、临时脚本），不进版本库
+.workbuddy-ai/

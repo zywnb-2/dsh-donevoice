@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安装 / 升级 / 卸载步骤
+    url: https://github.com/zywnb-2/dsh-donevoice/blob/main/README.md#安装
+    about: 先看 README 的安装章节，三种装法都写了。
+  - name: 发版与上架说明
+    url: https://github.com/zywnb-2/dsh-donevoice/blob/main/RELEASE.md
+    about: 想自己改一版发出来？发版清单在这里。
