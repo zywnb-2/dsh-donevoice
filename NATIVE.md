@@ -172,7 +172,7 @@ DSH 宿主插件的模块热重载默认**是关的**（`dsh-hmr` 的 `root` 默
 - id: hmr
   config:
     root:
-      - "D:/AppMaker/DSH-Creation/DoneVoice/dsh-donevoice"
+      - "<你的插件源码目录的绝对路径>"
 ```
 
 于是**改宿主源码 → 插件自动热重载**（实测：改完 8 秒内 `GET /health.json` 就能看到新字段）。

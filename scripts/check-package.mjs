@@ -18,7 +18,7 @@
  * 退出码：0 全部通过；1 有检查项失败。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -284,6 +284,22 @@ section('本地 ZIP 安装脚本（隔离 profile，不修改真实 DSH）')
 // 测试目录在 .workbuddy-ai 下：installer 复制源码时跳过它，避免把测试目录复制进自身。
 const testRoot = join(ROOT, '.workbuddy-ai')
 mkdirSync(testRoot, { recursive: true })
+
+// 上一次自检若被中断（Ctrl-C、超时被杀、编辑器里点了停止），下面的隔离目录会留在
+// .workbuddy-ai 下——里面是一份完整的插件源码副本，约 2 MB。攒几次就是几十兆，
+// 而且它被 .gitignore 挡着，`git status` 里完全看不见，很容易一直没人发现。
+// 所以每次开跑前先扫一遍：只删**超过 1 小时**的，避免误伤正在并行跑的另一次自检。
+const STALE_TEST_HOME_MS = 60 * 60 * 1000
+for (const entry of readdirSync(testRoot, { withFileTypes: true })) {
+  if (!entry.isDirectory() || !entry.name.startsWith('check-install-')) continue
+  const stale = join(testRoot, entry.name)
+  try {
+    if (Date.now() - statSync(stale).mtimeMs > STALE_TEST_HOME_MS) rmSync(stale, { recursive: true, force: true })
+  } catch {
+    // 清不掉就算了：这是清理副产品，不该因为它挡住真正的自检结论。
+  }
+}
+
 const testHome = mkdtempSync(join(testRoot, 'check-install-'))
 const testProfile = join(testHome, 'profiles', 'desktop')
 const testLink = join(testProfile, 'node_modules', pkg.name)
@@ -349,6 +365,54 @@ try {
     if (error.code === 'ENOENT') rmSync(testHome, { recursive: true, force: true })
     else fail('清理测试目录', String(error))
   }
+}
+
+// --------------------------------------------- 本机私有路径（不该出现在公开仓库）
+
+section('本机私有路径')
+// 一行 YAML 示例里的真实路径，在 diff 里毫不起眼，但推上去就永久留在公开仓库和 git 历史里。
+// 真漏过一次：NATIVE.md 的 hmr 示例里写着开发机的实际路径。
+//
+// ⚠️ 这里**刻意不维护「私有字符串黑名单」**。第一版就是那么写的——把开发机的目录名列进脚本里，
+//    结果脚本自己成了泄漏源：为了检测某个私有名字而把它抄进公开仓库，等于帮倒忙。
+//    所以改成**结构判断**：盘符绝对路径的**第一段**不在通用名单里，就视为「本机真实路径」。
+const GENERIC_PATH_SEGMENTS = new Set([
+  'users', 'windows', 'program files', 'program files (x86)', 'programdata',
+  'path', 'to', 'public', 'temp', 'tmp', 'appdata', 'ds', 'dsh',
+])
+// 前一个字符不能是字母数字或连字符，否则会误伤 `dsh-app://app`、`https://…` 这类协议串。
+const DRIVE_PATH = /(?<![-\w])[A-Za-z]:[\\/][^\s`"'|,;)\]}]*/g
+const SCANNED_EXTENSIONS = /\.(?:md|js|mjs|json|yml|yaml|txt|svg|html|css)$/i
+
+const trackedFiles = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+  .trim()
+  .split('\n')
+  .filter(Boolean)
+const suspiciousPaths = []
+for (const rel of trackedFiles) {
+  if (!SCANNED_EXTENSIONS.test(rel)) continue
+  const text = readFileSync(join(ROOT, rel), 'utf8')
+  for (const match of text.matchAll(DRIVE_PATH)) {
+    const raw = match[0]
+    const segments = raw.slice(2).split(/[\\/]+/).filter(Boolean)
+    if (segments.length === 0) continue
+    const head = segments[0].toLowerCase()
+    if (!GENERIC_PATH_SEGMENTS.has(head)) {
+      suspiciousPaths.push(`${rel} → ${raw}`)
+      continue
+    }
+    // `C:\Users\<你>\…`（占位符）与 `C:\Users\Public\…`（系统）放行；
+    // 换成真实用户名的写法就要拦——这是最容易漏的一类（Windows 用户名往往就是真名）。
+    if (head === 'users' && segments.length > 1) {
+      const user = segments[1]
+      if (!user.startsWith('<') && user.toLowerCase() !== 'public') suspiciousPaths.push(`${rel} → ${raw}`)
+    }
+  }
+}
+if (suspiciousPaths.length === 0) {
+  ok('无本机私有路径', `扫描 ${trackedFiles.length} 个被跟踪文件`)
+} else {
+  fail('检出疑似本机私有路径', `${[...new Set(suspiciousPaths)].join('；')}；改成 <你的…> 这类占位符再提交`)
 }
 
 // ---------------------------------------------------------------- 结论
