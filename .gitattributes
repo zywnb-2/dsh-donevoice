@@ -1,9 +1,17 @@
-# 让 Git 别把二进制提示音当成文本处理（避免换行符被改写、diff 变成噪音）。
+# 统一换行符：仓库里一律 LF。
+# Windows 上 git 默认会把工作区换成 CRLF，于是每次提交都刷一堆
+# "LF will be replaced by CRLF" 警告，GitHub 上的 Linux CI 与本地看到的又不是同一份字节。
+# 这里钉死成 LF，两边一致。
+* text=auto eol=lf
+
+# 二进制提示音：绝不参与任何文本转换或行尾处理。
+# 必须写在上面那条**之后**——同一路径上后出现的规则生效。
 *.mp3 binary
 *.wav binary
 *.m4a binary
 *.wma binary
 *.aac binary
 
-# 图标是文本，但要保证各处取到同一份字节。
+# 图标与 patch 文件要逐字节可复现。
 *.svg text eol=lf
+cordis.patch.yml text eol=lf
