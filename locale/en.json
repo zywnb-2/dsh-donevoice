@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DoneVoice notifications",
+    "description": "When a task completes, waits for your approval, asks you a question, or fails, the host process raises a Windows notification with a sound — visible and audible from any window. In-page cards are the optional fallback, used only when the host channel is unavailable. Click the notification to jump back to the session. Codex / WorkBuddy style."
+  }
+}

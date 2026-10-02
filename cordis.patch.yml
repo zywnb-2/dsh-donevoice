@@ -1,0 +1,10 @@
+# dsh-donevoice bundle patch.
+# 把本插件的 Host 半区插入当前 profile；浏览器半区由 package.json 的 dsh.client 声明。
+#
+# 注意 id 的选择是**契约**：DSH 的设置系统按 Loader 条目 id 索引命名空间
+# （dsh-settings 的 describe() 用 entry.options.id 作为 ns），而客户端的
+# ctx.configForms.get('<id>') 也按同一个 id 取自己那份表单。这里的 `donevoice`
+# 必须与 client.js 里的 HOST_ENTRY_ID 完全一致，否则设置页读不到值。
+- insert:
+    - id: donevoice
+      name: dsh-donevoice

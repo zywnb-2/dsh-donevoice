@@ -1,0 +1,63 @@
+{
+  "name": "dsh-donevoice",
+  "version": "1.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "DoneVoice：DeepSeek Harness 的完成/审批/提问/失败提醒——由宿主进程弹 Windows 系统通知（带彩色图标与 15 个自带提示音），不依赖任何页面。",
+  "icon": "./icon.svg",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "host-config.js",
+    "host-sensors.js",
+    "win-native.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "sounds/*.mp3",
+    "sounds/SOURCES.md",
+    "locale/*.json",
+    "README.md",
+    "NATIVE.md",
+    "ARCHITECTURE.md",
+    "LICENSE",
+    "install.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "notification",
+    "windows-toast",
+    "reminder",
+    "desktop"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
