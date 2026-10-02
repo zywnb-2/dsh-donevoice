@@ -59,5 +59,13 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zywnb-2/dsh-donevoice.git"
+  },
+  "homepage": "https://github.com/zywnb-2/dsh-donevoice#readme",
+  "bugs": {
+    "url": "https://github.com/zywnb-2/dsh-donevoice/issues"
   }
 }
