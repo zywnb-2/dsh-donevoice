@@ -81,7 +81,7 @@
 2. 把这行粘进去：
 
    ```
-   github:zywnb-2/dsh-donevoice#v1.1.1
+   github:zywnb-2/dsh-donevoice#v1.1.2
    ```
 
 3. 确认安装 → **重启 DSH** → 打开 **设置 → 提醒 → 总开关**
@@ -93,7 +93,7 @@
 ### 方式 B：命令行
 
 ```bash
-dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.1.1
+dsh plugin --profile desktop add github:zywnb-2/dsh-donevoice#v1.1.2
 ```
 
 profile 不叫 `desktop` 就换成你自己的（`<DSH_HOME>/profiles/` 下的目录名）。
@@ -146,7 +146,7 @@ $env:ELECTRON_RUN_AS_NODE = 1
 
 | DoneVoice | 对应 DSH | 说明 |
 |---|---|---|
-| **1.1.1** | 0.2.0-rc.2 | 当前已发布的 GitHub 版本。安装规格：`github:zywnb-2/dsh-donevoice#v1.1.1` |
+| **1.1.2** | 0.2.0-rc.2 | 当前已发布的 GitHub 版本。安装规格：`github:zywnb-2/dsh-donevoice#v1.1.2` |
 
 DSH 的插件入口**没有自动更新**。升级就是换一个 tag：
 

@@ -44,7 +44,7 @@ import { MAX_SOUND_BYTES, SOUND_EXTS, SOUND_FILES, clickMarkerFile, clampVolume,
 export const name = 'donevoice'
 
 /** 版本（与 package.json / client.js 对齐，由 test/validate.mjs 钉住）。 */
-export const version = '1.1.1'
+export const version = '1.1.2'
 
 /** 配置读写路由。 */
 export const CONFIG_PATH = '/plugins/dsh-donevoice/config.json'
