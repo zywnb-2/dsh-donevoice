@@ -197,6 +197,7 @@ if (args.tagCurrent) {
   console.log(`  index.js       export const version = '${current}' -> '${target}'`)
   console.log(`  client.js      const VERSION = '${current}' -> '${target}'`)
   console.log(`  README.md      安装命令里的 #v${current} -> #v${target}`)
+  console.log(`  README.md      版本对应表里的 **${current}** -> **${target}**`)
 }
 console.log('将要执行：')
 console.log(`  node scripts/check-package.mjs`)
@@ -226,6 +227,9 @@ if (!args.tagCurrent) {
   // README 的安装章节把 tag 写死在命令里，漏改就会让文档指着一个旧版本——
   // 正是这份文档自己反复警告的「文档和实际装到的版本对不上」。全局替换所有 #v<旧>。
   rewrite(README, new RegExp(`#v${current.replace(/\./g, '\\.')}\\b`, 'g'), `#v${target}`)
+  // 「版本对应与升级」表里那一格是**不带 `#`** 的裸版本号，上面那条全局替换碰不到它，
+  // 得单独改；否则发完版表格还写着旧版本号（自检会拦，见 check-package.mjs）。
+  rewrite(README, new RegExp(`\\| \\*\\*${current.replace(/\./g, '\\.')}\\*\\* \\|`), `| **${target}** |`)
 }
 
 console.log('\n→ 自检')
