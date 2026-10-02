@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "DoneVoice：DeepSeek Harness 的完成/审批/提问/失败提醒——由宿主进程弹 Windows 系统通知（带彩色图标与 15 个自带提示音），不依赖任何页面。",
+  "description": "DoneVoice：DeepSeek Harness 的完成/审批/提问/失败提醒——由宿主进程弹 Windows 系统通知（带彩色图标与内置提示音），不依赖任何页面。",
   "icon": "./icon.svg",
   "main": "index.js",
   "exports": {
