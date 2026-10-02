@@ -153,10 +153,10 @@
 
 ```powershell
 # 1) 探针：宿主活着吗？原生通道可用吗？传感器收了多少事件？最近 5 条投递去哪了？
-curl http://127.0.0.1:19387/plugins/dsh-donevoice/health.json
+curl http://127.0.0.1:<你的 DSH 端口>/plugins/dsh-donevoice/health.json
 
 # 2) 独立打一发（不需要页面）
-curl -X POST http://127.0.0.1:19387/plugins/dsh-donevoice/notify ^
+curl -X POST http://127.0.0.1:<你的 DSH 端口>/plugins/dsh-donevoice/notify ^
      -H "content-type: application/json" -d "{\"kind\":\"completion\"}"
 # → {"ok":true,"kind":"completion","delivered":["toast","sound"],"degraded":[],"deduped":false,"latencyMs":14}
 ```

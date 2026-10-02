@@ -25,6 +25,7 @@
     "sounds/SOURCES.md",
     "locale/*.json",
     "README.md",
+    "DEVELOPMENT.md",
     "NATIVE.md",
     "ARCHITECTURE.md",
     "LICENSE",

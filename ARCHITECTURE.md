@@ -403,7 +403,7 @@ ctx.inject(['uiSession'], (scope) => {
 **现在的把关方式是端到端真机验收，而不是离线单测。**
 
 ```powershell
-curl.exe -s http://127.0.0.1:19387/plugins/dsh-donevoice/health.json   # 现在用手动三步验收，见 README
+curl.exe -s http://127.0.0.1:<你的 DSH 端口>/plugins/dsh-donevoice/health.json   # 现在用手动三步验收，见 README
 ```
 
 它按顺序验这几件事，任何一步不成立都会红：
