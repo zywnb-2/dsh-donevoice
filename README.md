@@ -17,18 +17,6 @@
 > 这不是 `dsh-reminder` 的补丁，而是**独立重写**：目标一致（DSH 的完成提醒），实现路径不同。
 > 原版无法加载的具体原因逐条查清后才动手，下表是两者的工程对照。
 
-| | dsh-reminder（旧） | **dsh-donevoice（本插件）** |
-|---|---|---|
-| 能不能装 | ❌ 无 `lib/`、无 `node_modules`、无 lockfile | ✅ **源码即产物**，拷贝进 profile 就能跑，没有构建命令 |
-| 能不能加载 | ❌ `require("@deepseek-ai/dsh-client-runtime/client")` —— 该包在 DSH 里不存在 | ✅ 只 `require('react')`（平台基线种子词），模块表风险为零 |
-| 检测对不对 | ❌ 读 `turnEnds` / `pendingInteraction` / `sessions.open()` —— 全都不存在 | ✅ 只用官方**顺序无关**的两类数据源：3 个转发的 emit 事件 + `uiSession.sessionStatus` |
-| 会不会帮倒忙 | ⚠️ 若订阅审批 waterfall 且写错 `next()` 会**卡死审批** | ✅ **完全不订阅 waterfall**，只读一个 Map，结构上不可能干扰审批 |
-| 设置怎么存 | ❌ 自建 Typert Remote（158 行 + zod 依赖），且导入不存在的导出 | ✅ 宿主零外部依赖：`$DSH_HOME/donevoice/config.json`（原子写）+ 同源路由 `GET/PUT` |
-| 宿主半区依赖 | ❌ 导入不存在的 `settingsNamespace` | ✅ **只 `import 'node:*'`**（第三方插件 import 裸包名会链接期失败，实机验证过） |
-| 文档一致性 | ❌ 注释/README/代码/测试至少 7 处互相矛盾 | ✅ 每处事实带 `path:line`，注释与实现对拍 |
-| 测试测的是谁 | ⚠️ 测 `lib-testing/` 的另一份构建产物 | ✅ 用 `vm` 执行 `client.js` **原始字节** + 真实 ModuleLoader 握手，测的就是发布的那份 |
-
----
 
 ## 🖥️ 平台要求（装之前先看这一条）
 
