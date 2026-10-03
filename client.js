@@ -75,20 +75,23 @@ window.__ModuleLoader__.load({
     const NS = 'donevoice'
     /** 宿主 Loader 条目 id：同时是设置页槽位 id 与配置路由的归属名。必须与 cordis.patch.yml 一致。 */
     const HOST_ENTRY_ID = 'donevoice'
-    /** 版本（与 package.json / 宿主半区对齐，由 test/validate.mjs 钉住）。 */
-    const VERSION = '1.1.3'
+    /** 版本（与 package.json / 宿主半区对齐，由 `scripts/check-package.mjs` 钉住三处一致）。 */
+    const VERSION = '1.2.0'
     /**
      * 客户端构建标记：**每改一次 client.js 就加一**，并显示在设置页「诊断」第一行。
      *
      * 立它的原因：真机排查时反复搞不清"我这次改的到底有没有生效"（用户刷新的时机与改代码的
      * 时机交错，只能靠猜）。有了这个标记，截图第一行就能确定页面在跑哪一版。
-     *   r10 = 主信号改为**中继给宿主进程**（Windows 原生通知 + 音效），页内卡片降级为可选、
-     *         失败时才自动降级；页内卡片由 pageCard 开关控制（页内音效没有开关，页面上保持安静）
-     *   r9 = 桌面通知按最小间隔排队（防平台频率限制丢弃）
-     *   r8 = 通知 tag 唯一化（修掉主会话每轮撞同 tag、被 Windows 静默替换而不弹横幅）
-     *   r7 = 桌面通知提到最前 + 卡片/通知/声音三步互相隔离 + sessionStatus 的 running 边沿
+     *
+     * 只保留最近两代：更早的条目对"现在跑的是哪一版"已经没有信息量，
+     * 需要考古就翻 git 历史（每一次改动都有对应的 CHANGELOG 条目）。
+     *   r13 = 「顶部提醒」收敛成**单一实现**：顶部卡片与边框全由宿主原生窗口画（`win-overlay.cs`），
+     *         删掉页面那套 DOM 实现；配色收敛成 `ACCENT_COLORS` 一份；
+     *         `pageCard` 语义统一成"是否在页面内也呈现"；页内音效改由宿主播；
+     *         两种形态改成**替代关系**（不再同时弹系统通知）；降级时强制回落右下角卡片
+     *   r12 = 顶部提醒的第一版（页面 DOM + 宿主原生**两套并存**，已废弃）
      */
-    const REVISION = 'r11'
+    const REVISION = 'r13'
     /** 日志前缀。 */
     const TAG = '[donevoice]'
     /** 样式元素 id（HMR 幂等）。 */
@@ -113,27 +116,54 @@ window.__ModuleLoader__.load({
     //    漏改不会报错，只会静默走 fallback（"加了新音效却听起来全一样"就是这么来的）。
     // ════════════════════════════════════════════════════════════════════════
 
-    const BOOLEAN_FIELDS = ['enabled', 'pageCard']
+    /**
+     * 四类提醒的强调色 —— **与 host-config.js 的 ACCENT_COLORS 逐字一致**。
+     *
+     * 它是宿主系统通知图标、宿主原生覆盖层、以及本页右下角卡片**共用**的一套。
+     * 各写一份的结果是"同一个完成，三处三个绿"，所以由对拍脚本守着（见 check-config-contract.mjs）。
+     */
+    const ACCENT_COLORS = {
+      completion: '#2EA043',
+      approval: '#D29922',
+      question: '#4D6BFE',
+      failure: '#F85149',
+      test: '#4D6BFE',
+    }
+
+    const BOOLEAN_FIELDS = ['enabled', 'pageCard', 'edgeGlow', 'pageSound']
     const ENUM_FIELDS = {
+      // 通知形式：两种形态并存可切换（`card` 右下角页内卡片 / `topCard` 顶部提醒卡片）。
+      noticeStyle: ['card', 'topCard'],
       // ⚠️ `soundPreset` 的合法值**不在这里写**：它由 SOUND_IDS 派生（见该清单下方的赋值），
       // 免得"加了音效却忘了改枚举"这种静默回落再发生一次。
       // 投递策略**不是可选项，而是固定行为**（见 host-config.js 的说明）：
-      // 不在 DSH 页面 ⇒ 系统通知 + 音效（强制）；在 DSH 页面 ⇒ 只有 `pageCard` 一个可选开关。
+      // 不在 DSH 页面 ⇒ 系统通知 + 音效（强制）；在 DSH 页面 ⇒ 页面内按开关来。
     }
-    const ENUM_FALLBACK = { soundPreset: 'bell' }
+    const ENUM_FALLBACK = { soundPreset: 'bell', noticeStyle: 'card' }
     const NUMBER_FIELDS = {
       durationSec: { min: 3, max: 30, fallback: 6 },
+      cardDurationSec: { min: 3, max: 30, fallback: 6 },
       volume: { min: 0, max: 100, fallback: 70 },
       maxStack: { min: 1, max: 10, fallback: 4 },
+      glowFade: { min: 16, max: 110, fallback: 46 },
+      glowIntensity: { min: 30, max: 100, fallback: 100 },
+      glowSpeed: { min: 30, max: 220, fallback: 100 },
     }
     const DEFAULT_CONFIG = {
       // ⚠️ 必须与 host-config.js 的 DEFAULT_CONFIG 逐字一致（漏改只会静默走 fallback）。
-      //    总开关关着；`pageCard` 是唯一的可选开关；后三个字段不在设置页显示（取值仍会被夹紧）。
+      //    全默认关闭 + 沿用原有形态 ⇒ 装上不改变任何既有观感。
       enabled: false,
       pageCard: false,
+      edgeGlow: false,
+      pageSound: false,
+      noticeStyle: 'card',
       durationSec: 6,
+      cardDurationSec: 6,
       volume: 70,
       maxStack: 4,
+      glowFade: 46,
+      glowIntensity: 100,
+      glowSpeed: 100,
       soundPreset: 'bell',
     }
 
@@ -150,11 +180,6 @@ window.__ModuleLoader__.load({
       return Math.min(max, Math.max(min, Math.round(value)))
     }
 
-    /**
-     * 把任意输入归一化成完整配置；永不抛异常，未知字段丢弃，类型不符回落默认。
-     * @param raw 任意候选配置。
-     * @returns 完整合法的配置对象。
-     */
     /** 提示音 id 的合法语法：与 host-config.js 的 SOUND_ID_PATTERN 必须逐字一致。 */
     const SOUND_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/
 
@@ -175,6 +200,11 @@ window.__ModuleLoader__.load({
       return id === 'none' || SOUND_ID_PATTERN.test(id)
     }
 
+    /**
+     * 把任意输入归一化成完整配置；永不抛异常，未知字段丢弃，类型不符回落默认。
+     * @param raw 任意候选配置。
+     * @returns 完整合法的配置对象。
+     */
     function normalizeConfig(raw) {
       const source = raw !== null && typeof raw === 'object' ? raw : {}
       const out = {}
@@ -183,12 +213,19 @@ window.__ModuleLoader__.load({
       }
       for (const field of Object.keys(ENUM_FIELDS)) {
         const allowed = ENUM_FIELDS[field]
-        // 大小写不敏感：手改配置文件时写成 "BELL" 也该认账。
+        // 大小写不敏感：手改配置文件时写成 "BELL" / "TOPCARD" 也该认账。
         const candidate = typeof source[field] === 'string' ? source[field].trim().toLowerCase() : ''
+        // ⚠️ 比对两边都小写，并回写清单里的写法（canonical）——`noticeStyle` 的值是
+        //    camelCase 的 `topCard`，只小写输入、拿 `topcard` 去比它永远比不中，
+        //    表现成"这个字段怎么设都回落默认值"。与 host-config.js 逐字同口径。
+        let canonical
+        for (const item of allowed) {
+          if (item.toLowerCase() === candidate) { canonical = item; break }
+        }
         // `soundPreset` 是**开放式**字段（见 isSoundId 的说明），其余枚举仍按清单校验。
         out[field] = field === 'soundPreset'
           ? (isSoundId(candidate) ? candidate : ENUM_FALLBACK[field])
-          : (allowed.indexOf(candidate) >= 0 ? candidate : ENUM_FALLBACK[field])
+          : (canonical !== undefined ? canonical : ENUM_FALLBACK[field])
       }
       for (const field of Object.keys(NUMBER_FIELDS)) {
         const spec = NUMBER_FIELDS[field]
@@ -245,7 +282,16 @@ window.__ModuleLoader__.load({
       nav: '提醒',
       'settings.title': '提醒',
       'settings.enabled': '总开关',
+      'settings.noticeStyle': '通知形式',
+      'settings.noticeStyle.card': '右下角提醒',
+      'settings.noticeStyle.topCard': '顶部提醒',
+      'settings.edgeGlow': '边框光效',
+      'settings.glowFade': '羽化',
+      'settings.glowIntensity': '浓度',
+      'settings.glowSpeed': '流速',
       'settings.pageCard': '页内卡片',
+      'settings.cardDurationSec': '停留时间',
+      'settings.pageSound': '页内音效',
       'settings.sound': '提示音',
       'settings.sound.bell': '铃声',
       'settings.sound.ping': '叮·高',
@@ -286,7 +332,16 @@ window.__ModuleLoader__.load({
       nav: 'Reminders',
       'settings.title': 'Reminders',
       'settings.enabled': 'Master switch',
+      'settings.noticeStyle': 'Style',
+      'settings.noticeStyle.card': 'Bottom-right reminder',
+      'settings.noticeStyle.topCard': 'Top reminder',
+      'settings.edgeGlow': 'Edge glow',
+      'settings.glowFade': 'Feather',
+      'settings.glowIntensity': 'Intensity',
+      'settings.glowSpeed': 'Speed',
       'settings.pageCard': 'In-page card',
+      'settings.cardDurationSec': 'Dwell time',
+      'settings.pageSound': 'In-page sound',
       'settings.sound': 'Chime',
       'settings.sound.bell': 'Bell',
       'settings.sound.ping': 'Ping (high)',
@@ -784,12 +839,24 @@ window.__ModuleLoader__.load({
         '</svg>'
     }
 
+    /**
+     * 造一枚强调色图标：字形里用 `{c}` 占位，颜色只在 `ACCENT_COLORS` 里定义一次。
+     * 这样"图标颜色"与"卡片竖条/进度条颜色"不可能再走偏。
+     * @param kind 事件类型。
+     * @param glyph SVG 字形（用 `{c}` 表示强调色）。
+     * @returns SVG 字符串。
+     */
+    function accentIcon(kind, glyph) {
+      const color = ACCENT_COLORS[kind] ?? ACCENT_COLORS.test
+      return svgIcon(color, glyph.split('{c}').join(color))
+    }
+
     const ICON_SVG = Object.freeze({
-      completion: svgIcon('#34c77b', '<path d="M22 33l7 7 13-15" fill="none" stroke="#34c77b" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>'),
-      approval: svgIcon('#f0a020', '<path d="M32 19v14" stroke="#f0a020" stroke-width="4.5" stroke-linecap="round"/><circle cx="32" cy="43" r="2.8" fill="#f0a020"/>'),
-      question: svgIcon('#4d7ff5', '<path d="M26 25a6 6 0 1 1 8 5.6c-1.6.7-2 1.6-2 3.4" fill="none" stroke="#4d7ff5" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="43" r="2.8" fill="#4d7ff5"/>'),
-      failure: svgIcon('#e5484d', '<path d="M24 24l16 16M40 24L24 40" stroke="#e5484d" stroke-width="4.5" stroke-linecap="round"/>'),
-      test: svgIcon('#4da3ff', '<path d="M32 16a9 9 0 0 0-9 9v7l-3.5 5.5h25L41 32v-7a9 9 0 0 0-9-9z" fill="none" stroke="#4da3ff" stroke-width="4" stroke-linejoin="round"/><path d="M28.5 42a3.5 3.5 0 0 0 7 0" fill="none" stroke="#4da3ff" stroke-width="4" stroke-linecap="round"/>'),
+      completion: accentIcon('completion', '<path d="M22 33l7 7 13-15" fill="none" stroke="{c}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>'),
+      approval: accentIcon('approval', '<path d="M32 19v14" stroke="{c}" stroke-width="4.5" stroke-linecap="round"/><circle cx="32" cy="43" r="2.8" fill="{c}"/>'),
+      question: accentIcon('question', '<path d="M26 25a6 6 0 1 1 8 5.6c-1.6.7-2 1.6-2 3.4" fill="none" stroke="{c}" stroke-width="4" stroke-linecap="round"/><circle cx="32" cy="43" r="2.8" fill="{c}"/>'),
+      failure: accentIcon('failure', '<path d="M24 24l16 16M40 24L24 40" stroke="{c}" stroke-width="4.5" stroke-linecap="round"/>'),
+      test: accentIcon('test', '<path d="M32 16a9 9 0 0 0-9 9v7l-3.5 5.5h25L41 32v-7a9 9 0 0 0-9-9z" fill="none" stroke="{c}" stroke-width="4" stroke-linejoin="round"/><path d="M28.5 42a3.5 3.5 0 0 0 7 0" fill="none" stroke="{c}" stroke-width="4" stroke-linecap="round"/>'),
     })
 
     // ════════════════════════════════════════════════════════════════════════
@@ -951,11 +1018,11 @@ window.__ModuleLoader__.load({
       '.dv-card{pointer-events:auto;position:relative;overflow:hidden;display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:10px;padding:12px 12px 14px;border-radius:var(--dsw-radius-lg,16px);border:1px solid var(--dsw-elevation-stroke,var(--dsw-elevation-stroke-color,rgba(255,255,255,.14)));background:var(--dsw-alias-toast-bg,#353638);box-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(0,0,0,.28));color:var(--dsw-alias-toast-label,#ffffff);font-family:inherit;font-size:14px;line-height:22px;cursor:pointer;text-align:left;animation:dv-in 160ms ease-out both}',
       '.dv-card:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,#7aaaff);outline-offset:2px}',
       '.dv-card.dv-out{animation:dv-out 200ms ease both;pointer-events:none}',
-      '.dv-card[data-dv-kind=completion]{--dv-accent:var(--dsw-alias-state-success-primary,#22c55e)}',
-      '.dv-card[data-dv-kind=approval]{--dv-accent:var(--dsw-alias-state-warn-secondary,#f7ad31)}',
-      '.dv-card[data-dv-kind=question]{--dv-accent:var(--dsw-static-deepseek-400,#7aaaff)}',
-      '.dv-card[data-dv-kind=failure]{--dv-accent:var(--dsw-alias-state-error-secondary,#f25a5a)}',
-      '.dv-card[data-dv-kind=test]{--dv-accent:var(--dsw-static-deepseek-400,#7aaaff)}',
+      // 强调色**不在这里写**：`--dv-accent` 由 JS 从 `ACCENT_COLORS` 设成行内样式
+      // （见 createToastLayer 的 push）。CSS 再抄一份字面色就是第四个调色板了 ——
+      // 原来这里用 DSH token、图标用另一套字面色，结果是"同一张卡片的图标和竖条不是一个绿"。
+      // `--dv-accent` 兜底值只在 JS 没设上时才生效（正常路径永远设得上）。
+      '.dv-card{--dv-accent:#4D6BFE}',
       '.dv-icon{flex:none;width:22px;height:22px;margin-top:1px;display:block}',
       '.dv-main{min-width:0}',
       '.dv-title{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--dsw-alias-toast-label,#ffffff)}',
@@ -1031,6 +1098,12 @@ window.__ModuleLoader__.load({
       // 15 行清一色红框会把整个清单变成一堵红墙（用户嫌"拥挤/乱"），危险色留在交互瞬间就够。
       '.dv-danger{color:var(--dsw-alias-label-secondary,rgba(0,0,0,.7))}',
       '.dv-danger:hover{color:var(--dsw-alias-state-error-secondary,#f25a5a);border-color:var(--dsw-alias-state-error-secondary,rgba(242,90,90,.55))}',
+
+      // ── 「顶部提醒」的样式**不在这里** ──────────────────────────────────────
+      //    顶部卡片与整屏边框由**宿主原生窗口**画（win-overlay.cs，Win32 分层窗口）。
+      //    页面侧原来还有一套 DOM 实现（.dv-top* 与 #dsh-donevoice-glow），
+      //    两套画同一个东西必然漂移（果冻曲线 / 尺寸 / 圆角 / 配色各一套），已整体删除。
+      //    这里只剩右下角卡片那一种形态 —— 页面只画它，别的都归宿主。
     ].join('\n')
 
     /**
@@ -1149,7 +1222,10 @@ window.__ModuleLoader__.load({
 
         const card = document.createElement('article')
         card.className = 'dv-card'
-        card.dataset.dvKind = typeof event.kind === 'string' ? event.kind : 'completion'
+        const cardKind = typeof event.kind === 'string' ? event.kind : 'completion'
+        card.dataset.dvKind = cardKind
+        // 强调色从 ACCENT_COLORS 设成行内样式 —— 图标、竖条、进度条**同一个来源**。
+        card.style.setProperty('--dv-accent', ACCENT_COLORS[cardKind] ?? ACCENT_COLORS.test)
         // 阻塞性提醒用 alert（断言式播报），普通完成用 status（礼貌式）；
         // 容器层 aria-live="polite" 保证多卡片不会互相打断。
         card.setAttribute('role', event.kind === 'approval' || event.kind === 'failure' ? 'alert' : 'status')
@@ -1237,6 +1313,8 @@ window.__ModuleLoader__.load({
 
       return { push, dismissAll, count: () => live.length }
     }
+
+
 
     // ════════════════════════════════════════════════════════════════════════
     // 宿主中继通道（把提醒交给宿主进程去弹 Windows 原生通知）
@@ -1529,11 +1607,14 @@ window.__ModuleLoader__.load({
      * `update`、`preview`、`addSounds`、`removeSound`、`channelLost`）。
      *
      * 布局口径（用户定稿，两轮精简后）：
-     *   · **只有两个开关**：总开关 + 页内卡片。四类提醒 / 页内音效 / 子代理都**没有开关**
-     *     ——它们的语义变成了硬行为（见 host-config.js 的说明）。
      *   · **一行解释文字都不写**：没有副标题、没有分组小标题、没有 desc、没有"0 为静音"这类提示。
      *   · 总开关单独一块放最前（优先级最高）；它关着时下面**全部变灰且不可点**。
      *   · 音效相关收进**一个模块**：下拉试听 + 音量 + 可展开的「音效库」（添加与删除同处）。
+     *   · 四类提醒 / 子代理**没有开关**——它们的语义是硬行为（见 host-config.js 的说明）。
+     *   · **形态相关的行按需灰掉**，而不是藏起来：选「页内卡片」时，边框光效与它的三个滑条、
+     *     以及顶部卡片的停留时间都会变灰。灰比藏好——用户能看见"有这个东西，只是当前形态用不上"，
+     *     不会以为功能不存在。
+     *   · 边框**时长**刻意没有滑条：它是死逻辑（= 通知音效的时长），不是可调项。
      */
     function DoneVoiceSection(props) {
       const settings = props.useSettings((snapshot) => snapshot.value) ?? DEFAULT_CONFIG
@@ -1553,6 +1634,10 @@ window.__ModuleLoader__.load({
         : SOUND_IDS.slice()
       // 总开关关 ⇒ 下面全部失效（灰 + 不可点）。
       const masterOff = settings.enabled !== true
+      // 边框光效与"停留时间"只属于顶部卡片形态；选页内卡片时它们灰掉。
+      const topOff = masterOff || settings.noticeStyle !== 'topCard'
+      // 光效的三个滑条要等「边框光效」自己打开才有意义。
+      const glowOff = topOff || settings.edgeGlow !== true
       const soundOff = masterOff || settings.soundPreset === 'none' || !(settings.volume > 0)
 
       return h('section', { className: 'dv-section' },
@@ -1567,12 +1652,56 @@ window.__ModuleLoader__.load({
             onChange: set('enabled'),
           }),
         ),
-        // ── 唯一的可选开关 ──────────────────────────────────────────────
+        // ── 通知形式：两种形态并存、可切换 ────────────────────────────────
+        h('div', { className: masterOff ? 'dv-row dv-off' : 'dv-row' },
+          h('span', { className: 'dv-rowText' },
+            h('span', { className: 'dv-rowTitle' }, t('settings.noticeStyle')),
+          ),
+          h('select', {
+            className: 'dv-select',
+            value: settings.noticeStyle,
+            disabled: masterOff,
+            'aria-label': t('settings.noticeStyle'),
+            onChange: (nativeEvent) => { set('noticeStyle')(nativeEvent.target.value) },
+          },
+            h('option', { key: 'card', value: 'card' }, t('settings.noticeStyle.card')),
+            h('option', { key: 'topCard', value: 'topCard' }, t('settings.noticeStyle.topCard')),
+          ),
+        ),
+
+        // ── 页内卡片：你在 DSH 页面上时到底要不要被打扰（两种形态共用这道门禁）──
         h(ToggleRow, {
           label: t('settings.pageCard'),
           checked: settings.pageCard === true,
           disabled: masterOff,
           onChange: set('pageCard'),
+        }),
+
+        // ── 边框光效：只跟顶部卡片配套 ────────────────────────────────────
+        // 右下角卡片配满屏彩虹很奇怪，所以选「页内卡片」时这一行直接灰掉。
+        h(ToggleRow, {
+          label: t('settings.edgeGlow'),
+          checked: settings.edgeGlow === true,
+          disabled: topOff,
+          onChange: set('edgeGlow'),
+        }),
+        // 三个可调量的区间直接沿用原型滑条的实测范围（那三个滑条就是用来把手感调对的）。
+        // ⚠️ 边框**时长**刻意没有滑条：它是死逻辑，等于通知音效的时长（想改就换音效）。
+        h(RangeRow, { label: t('settings.glowFade'), value: settings.glowFade, min: 16, max: 110, unit: 'px', disabled: glowOff, onChange: set('glowFade') }),
+        h(RangeRow, { label: t('settings.glowIntensity'), value: settings.glowIntensity, min: 30, max: 100, unit: '%', disabled: glowOff, onChange: set('glowIntensity') }),
+        h(RangeRow, { label: t('settings.glowSpeed'), value: settings.glowSpeed, min: 30, max: 220, unit: '%', disabled: glowOff, onChange: set('glowSpeed') }),
+
+        // ── 顶部卡片的停留时间（与页内卡片的 durationSec 各自可调）──────────
+        h(RangeRow, { label: t('settings.cardDurationSec'), value: settings.cardDurationSec, min: 3, max: 30, unit: 's', disabled: topOff, onChange: set('cardDurationSec') }),
+
+        // ── 页内音效：在 DSH 页面上**也**响一次 ───────────────────────────
+        // 默认关 —— 与"我在工作状态，能看到任务，提醒多余"那条定稿一致；愿意在 DSH 里
+        // 也听见声音的人自己打开。打开后边框光效会跟着这一次音效的时长走。
+        h(ToggleRow, {
+          label: t('settings.pageSound'),
+          checked: settings.pageSound === true,
+          disabled: masterOff,
+          onChange: set('pageSound'),
         }),
 
         // ── 音效（一个模块装下：选 / 试听 / 音量 / 音效库）──────────────────
@@ -2097,20 +2226,16 @@ window.__ModuleLoader__.load({
         }
       }
 
-      // ── 两个投递通道（浏览器通知兜底已按用户要求整体删除）─────────────────
+      // ── 投递通道（浏览器通知兜底已按用户要求整体删除）─────────────────────
       const chime = createChime(() => settings)
-      const toasts = createToastLayer({
-        getConfig: () => settings,
-        onOpen: focusAndOpen,
-        onDismiss: () => {},
-        prefersReducedMotion: () => {
-          try {
-            return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches === true
-          } catch {
-            return false
-          }
-        },
-      })
+      /** `prefers-reduced-motion` 判定：卡片不做果冻、光效不转、进度条不显示。 */
+      const prefersReduced = () => {
+        try {
+          return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches === true
+        } catch {
+          return false
+        }
+      }
 
       /**
        * 磁盘可读诊断（**不需要重启宿主进程**）。
@@ -2126,6 +2251,9 @@ window.__ModuleLoader__.load({
         version: VERSION,
         pageCard: null,
         enabled: null,
+        noticeStyle: null,
+        edgeGlow: null,
+        pageSound: null,
         background: null,
         counters: { snapshots: 0, pendings: 0, fired: 0, skippedSame: 0, gated: 0, delivered: 0, cards: 0, relays: 0, relayOk: 0, relayFailed: 0, relayDegraded: 0 },
         pendingChannel: null,
@@ -2162,6 +2290,9 @@ window.__ModuleLoader__.load({
           diag.at = new Date().toISOString()
           diag.pageCard = settings.pageCard === true
           diag.enabled = settings.enabled
+          diag.noticeStyle = settings.noticeStyle
+          diag.edgeGlow = settings.edgeGlow === true
+          diag.pageSound = settings.pageSound === true
           // 配置同步状态：排查"我改了但重开又变回去"时，先看这三项。
           //  `configLoaded=false` ⇒ 页面用的是默认值（宿主还没就绪），此时**不会**写盘。
           //  `lastSavedAt` ⇒ 最近一次真的落盘的时刻；一直是 null 就说明一次都没写成功。
@@ -2255,22 +2386,32 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 推一张页内卡片。做成唯一入口是为了让"卡片层抛异常不能连坐其它通道"这条
+       * 推一张**页内**卡片。做成唯一入口是为了让"卡片层抛异常不能连坐其它通道"这条
        * 真机教训只在一个地方兜住。
+       *
+       * ⚠️ 只有 `noticeStyle === 'card'`（右下角）才归页面画。
+       * 「顶部提醒」那套是**宿主原生窗口**画的（`win-overlay.cs`），页面完全不参与 ——
+       * 所以看到 topCard 直接返回 null：这不是失败，是"这条路不归我管"。
+       * 返回 null 时调用方不会把它当成 'threw'，也就不会误报降级。
        * @param event 引擎事件。
        * @param spec `describeEvent` 的产物。
-       * @returns 'shown' | 'threw'。
+       * @param force 降级用：`true` 时**无视形态**强制走右下角卡片层（见降级分支的说明）。
+       * @returns 'shown' | 'threw' | null（null = 该形态不归页面画）。
        */
-      function pushCard(event, spec) {
+      function pushCard(event, spec, force) {
+        if (force !== true && settings.noticeStyle === 'topCard') return null
         try {
           toasts.push(event, { title: spec.title, body: spec.body, icon: spec.icon, hint: t('card.openHint') })
           return 'shown'
         } catch (error) {
-          noteDiagError('toasts.push', error)
+          noteDiagError('pushCard', error)
           degrade('页内卡片渲染失败', String(error))
           return 'threw'
         }
       }
+
+
+
 
       /**
        * 按规则响一声**本地** Web Audio。
@@ -2391,10 +2532,14 @@ window.__ModuleLoader__.load({
                 + (result.deduped === true ? '，宿主侧已弹过' : '') + '）')
               return
             }
-            // 你在页面上：系统通知按设计不弹；页面内按两个开关来。
+            // 你在页面上：系统通知按设计不弹。
+            // ★ 顶部形态的卡片与边框**已经由宿主画完了**（回执里的 `overlayShown`），
+            //   页面这边不参与；右下角形态才由页面补一张 DOM 卡片（`pushCard` 内部自己判形态）。
+            // ★ 页内音效也**由宿主播**（回执里的 `pageSounded`）—— 页面不再自己响，
+            //   否则顶部形态下它会永远不生效（宿主画了覆盖层 ⇒ 页面不画卡片 ⇒ 音效挂空）。
             const inPageCard = settings.pageCard === true ? pushCard(event, spec) : null
-            // 宿主已经播过就不重复响（回执里如实带回 soundPlayed）。
-            // 页内音效没有开关了 ⇒ 你在页面上时保持安静（宿主也不再"只播音效"）。
+            // 宿主已经播过就不重复响（回执里如实带回 soundPlayed / pageSounded）；
+            // 本地 Web Audio 只在降级路径上用，这里恒为 false。
             const chimed = false
             commitDecision({
               relayWanted: true,
@@ -2406,9 +2551,13 @@ window.__ModuleLoader__.load({
               cardResult: inPageCard,
               degraded: false,
               chimed,
+              glowed: result.overlayShown === true,
+              pageSounded: result.pageSounded === true,
             })
             record(event.kind + ' → ' + spec.title + ' | 你在 DSH 页面上 → 不弹系统通知'
               + (inPageCard === 'shown' ? ' + 页内卡片' : '')
+              + (result.overlayShown === true ? ' + 宿主覆盖层' : '')
+              + (result.pageSounded === true ? ' + 页内音效' : '')
               + (result.soundPlayed === true ? ' + 宿主音效' : (chimed ? ' + 本地音' : '')))
             return
           }
@@ -2426,7 +2575,11 @@ window.__ModuleLoader__.load({
            */
           const onPage = isWindowBackground() !== true
           const allowCard = onPage !== true || settings.pageCard === true
-          const degradedCard = allowCard ? pushCard(event, spec) : null
+          // ★ 降级时**强制**走右下角卡片，无视 `noticeStyle`。
+          //   理由：中继不通 ⇒ 宿主那条路全废 ⇒ 顶部形态的覆盖层根本画不出来。
+          //   这时如果还守着"顶部形态不归页面画"，用户看到的就是**一片空白** ——
+          //   违背本项目的"降级必须可见"。降级成右下角卡片至少看得见、点得动、能回会话。
+          const degradedCard = allowCard ? pushCard(event, spec, true) : null
           // 同理：页面上没开「页内音效」时不补本地音（走开时宿主那条是强制的，不受此限）。
           const chimed = onPage === true ? false : playChime(event, background)
           commitDecision({
@@ -2439,8 +2592,11 @@ window.__ModuleLoader__.load({
             cardResult: degradedCard,
             degraded: true,
             chimed,
+            glowed: false,
+            pageSounded: false,
           })
-          record(event.kind + ' → ' + spec.title + ' | 中继失败降级：页内卡片' + (chimed ? ' + 本地音' : '') + '（' + reason + '）')
+          record(event.kind + ' → ' + spec.title + ' | 中继失败降级：页内卡片'
+            + (chimed ? ' + 本地音' : '') + '（' + reason + '）')
         }
 
         try {
@@ -2931,8 +3087,12 @@ window.__ModuleLoader__.load({
         }
       }), 'donevoice: capability watchdog')
 
+
       publishDebug({
         toasts: () => toasts.count(),
+        // 顶部提醒由宿主原生窗口画，页面这边没有对应的层可报 —— 只报配置，便于外部核对。
+        noticeStyle: () => settings.noticeStyle,
+        edgeGlow: () => settings.edgeGlow === true,
         delivered: () => debug.events.length,
         diag: () => JSON.parse(JSON.stringify(diag)),
       })

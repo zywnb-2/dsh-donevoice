@@ -51,6 +51,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// 相对导入自家模块没问题（那条"不许 import 裸包名"的约束针对的是 `@scope/pkg`：
+// profile 的 node_modules 里没有它们，静态 import 会在链接期炸掉整个宿主条目）。
+import { ACCENT_COLORS } from './host-config.js'
 
 /** 我们自己的 AppUserModelID（开始菜单快捷方式里注册的就是它）。 */
 export const NATIVE_AUMID = 'DeepSeek.Harness.DoneVoice'
@@ -199,12 +202,204 @@ export function soundDirs(options) {
 }
 
 /**
+ * MPEG 版本 → 采样率表（index 3 是保留值，调用方负责挡掉）。
+ * 版本键：`1` = MPEG1，`2` = MPEG2，`25` = MPEG2.5。
+ */
+const MPEG_SAMPLE_RATES = Object.freeze({
+  1: [44100, 48000, 32000],
+  2: [22050, 24000, 16000],
+  25: [11025, 12000, 8000],
+})
+
+/**
+ * 比特率表（kbps）。键 = `<MPEG1/2>-<layer>`，index 0 = free、15 = 非法。
+ * MPEG2 与 MPEG2.5 共用同一张表（规范如此）。
+ */
+const MPEG_BITRATES = Object.freeze({
+  '1-1': [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 0],
+  '1-2': [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 0],
+  '1-3': [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0],
+  '2-1': [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256, 0],
+  '2-2': [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0],
+})
+
+/**
+ * 解析一个 MPEG 音频帧头。
+ * @param buffer 整个文件缓冲。
+ * @param at 帧头起始下标。
+ * @returns 帧参数对象；不是合法帧头时 null。
+ */
+function parseMpegFrame(buffer, at) {
+  const b1 = buffer[at + 1]
+  const b2 = buffer[at + 2]
+  if (buffer[at] !== 0xff || (b1 & 0xe0) !== 0xe0) return null
+  const versionBits = (b1 >> 3) & 0x3 // 0=2.5，1=保留，2=MPEG2，3=MPEG1
+  const layerBits = (b1 >> 1) & 0x3 // 0=保留，1=L3，2=L2，3=L1
+  if (versionBits === 1 || layerBits === 0) return null
+  const version = versionBits === 3 ? 1 : versionBits === 2 ? 2 : 25
+  const layer = 4 - layerBits
+  const bitrateIndex = (b2 >> 4) & 0xf
+  const rateIndex = (b2 >> 2) & 0x3
+  if (bitrateIndex === 0 || bitrateIndex === 15 || rateIndex === 3) return null
+  const table = MPEG_BITRATES[(version === 1 ? '1' : '2') + '-' + String(layer)]
+  if (table === undefined) return null
+  const bitrate = table[bitrateIndex] * 1000
+  if (!(bitrate > 0)) return null
+  const sampleRate = MPEG_SAMPLE_RATES[version][rateIndex]
+  const padding = (b2 >> 1) & 0x1
+  const channels = ((buffer[at + 3] >> 6) & 0x3) === 3 ? 1 : 2
+  const samplesPerFrame = layer === 1 ? 384 : layer === 2 ? 1152 : (version === 1 ? 1152 : 576)
+  // 每帧字节数：Layer1 按槽（4 字节）对齐，Layer2/3 按 samplesPerFrame/8 换算。
+  const frameBytes = layer === 1
+    ? Math.floor((12 * bitrate / sampleRate + padding) * 4)
+    : Math.floor((samplesPerFrame / 8) * bitrate / sampleRate + padding)
+  if (!(frameBytes > 0)) return null
+  return { version, layer, sampleRate, samplesPerFrame, frameBytes, channels }
+}
+
+/**
+ * 从 MP3 缓冲里量出时长（毫秒）。
+ *
+ * 优先读 Xing/Info 头里的**帧数**（VBR 也准），读不到再按 CBR 用"剩余字节 ÷ 每帧字节"估。
+ * @param buffer 整个文件缓冲。
+ * @returns 毫秒；判不出来时 null。
+ */
+function mp3DurationMs(buffer) {
+  const len = buffer.length
+  let start = 0
+  // 跳过 ID3v2：`ID3` + 版本 + flags + 4 字节 syncsafe 长度。
+  if (len > 10 && buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
+    let size = ((buffer[6] & 0x7f) << 21) | ((buffer[7] & 0x7f) << 14) | ((buffer[8] & 0x7f) << 7) | (buffer[9] & 0x7f)
+    if ((buffer[5] & 0x10) !== 0) size += 10 // 带 footer
+    start = 10 + size
+  }
+  // 找第一个真正合法的帧头（文件里可能有 0xFF 填充字节，必须用帧头规则校验）。
+  let at = -1
+  for (let i = Math.max(0, start); i + 4 <= len; i++) {
+    if (buffer[i] !== 0xff) continue
+    const head = parseMpegFrame(buffer, i)
+    if (head !== null) { at = i; break }
+  }
+  if (at < 0) return null
+  const head = parseMpegFrame(buffer, at)
+  if (head === null) return null
+
+  // Xing / Info 头紧跟在帧头 + side info 之后。
+  const sideInfo = head.version === 1 ? (head.channels === 1 ? 17 : 32) : (head.channels === 1 ? 9 : 17)
+  const tagAt = at + 4 + sideInfo
+  if (tagAt + 12 <= len) {
+    const tag = buffer.toString('latin1', tagAt, tagAt + 4)
+    if (tag === 'Xing' || tag === 'Info') {
+      const flags = buffer.readUInt32BE(tagAt + 4)
+      if ((flags & 0x1) !== 0) {
+        const frames = buffer.readUInt32BE(tagAt + 8)
+        if (frames > 0) return Math.round((frames * head.samplesPerFrame / head.sampleRate) * 1000)
+      }
+    }
+  }
+
+  // CBR 估算。两个细节都影响精度，逐帧走的独立实现对照过：
+  //   · 末尾 128 字节的 ID3v1（`TAG`）不是音频，要从长度里减掉；
+  //   · 帧数必须**向下取整** —— 文件尾部常有不足一帧的填充字节，
+  //     按小数算会多出零点几帧（实测 44.1kHz 的那几个会因此多报 2ms）。
+  let end = len
+  if (end > 128 && buffer[end - 128] === 0x54 && buffer[end - 127] === 0x41 && buffer[end - 126] === 0x47) end -= 128
+  const frames = Math.floor((end - at) / head.frameBytes)
+  if (!(frames > 0)) return null
+  return Math.round((frames * head.samplesPerFrame / head.sampleRate) * 1000)
+}
+
+/**
+ * 从 WAV 缓冲里量出时长（毫秒）：`data` 块字节数 ÷ `fmt ` 里的 byteRate。
+ * @param buffer 整个文件缓冲。
+ * @returns 毫秒；判不出来时 null。
+ */
+function wavDurationMs(buffer) {
+  if (buffer.length < 44) return null
+  if (buffer.toString('latin1', 0, 4) !== 'RIFF' || buffer.toString('latin1', 8, 12) !== 'WAVE') return null
+  let at = 12
+  let byteRate = 0
+  let dataSize = 0
+  while (at + 8 <= buffer.length) {
+    const id = buffer.toString('latin1', at, at + 4)
+    const size = buffer.readUInt32LE(at + 4)
+    if (id === 'fmt ' && at + 24 <= buffer.length) byteRate = buffer.readUInt32LE(at + 16)
+    if (id === 'data') {
+      dataSize = Math.min(size, buffer.length - at - 8)
+      break
+    }
+    at += 8 + size + (size % 2) // chunk 按偶数字节对齐
+  }
+  if (!(byteRate > 0) || !(dataSize > 0)) return null
+  return Math.round((dataSize / byteRate) * 1000)
+}
+
+/**
+ * 量一个音效文件的时长（毫秒）。**零依赖**，只读文件头。
+ *
+ * 为什么宿主必须算出这个数：页内「边框光效」有一条**死逻辑**——它的存在时长必须完全等于
+ * 通知音效的时长，既不许有自己的计时器，也不许做成可调项（用户定稿）。
+ * 而音效文件在磁盘上、只有宿主的 worker 播得了，页面拿不到 ⇒ 时长只能由宿主量出来，
+ * 随 `sounds.json` 一起交给页面。
+ *
+ * 覆盖面**刻意保守**：只解析 MP3 与 WAV（自带的 15 个音效全是 MP3）。其余格式返回 null，
+ * 由页面退回一个兜底时长——宁可"偶尔退回兜底"，也不要为全覆盖写一个会算错的解析器。
+ * @param filePath 音频文件绝对路径。
+ * @param ext 小写扩展名（含点）。
+ * @param size 文件字节数（调用方已 stat 过）。
+ * @returns 毫秒（四舍五入）；无法判定时 null。
+ */
+export function audioDurationMs(filePath, ext, size) {
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_SOUND_BYTES) return null
+  let buffer = null
+  try {
+    buffer = readFileSync(filePath)
+  } catch {
+    return null
+  }
+  try {
+    if (ext === '.mp3') return mp3DurationMs(buffer)
+    if (ext === '.wav') return wavDurationMs(buffer)
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
+ * 时长缓存：键 = `路径|大小|mtime`。
+ *
+ * 为什么需要：`sounds.json` 在每次窗口获得焦点时都会被拉一次，而量时长要把整个文件读进内存
+ * （自带音效加起来约 1 MB）。带上 mtime 之后，用户换了文件缓存自动失效，不需要手动清。
+ */
+const durationCache = new Map()
+
+/**
+ * 带缓存的时长查询。
+ * @param file 绝对路径。
+ * @param size 字节数。
+ * @param mtimeMs 修改时间（毫秒）。
+ * @param ext 小写扩展名。
+ * @returns 毫秒或 null。
+ */
+function cachedDurationMs(file, size, mtimeMs, ext) {
+  const key = file + '|' + String(size) + '|' + String(mtimeMs)
+  const hit = durationCache.get(key)
+  if (hit !== undefined) return hit
+  const value = audioDurationMs(file, ext, size)
+  if (durationCache.size > 128) durationCache.clear()
+  durationCache.set(key, value)
+  return value
+}
+
+/**
  * 扫描音效目录，得到**实际可用**的音效清单。
  *
  * 这是音效的**唯一事实来源**：列表来自磁盘扫描，所以用户导入/删除后立刻生效，
  * 不需要改任何静态枚举（`host-config.js` 那边只按 id 语法校验，见 SOUND_ID_PATTERN）。
  * @param options 选项。
- * @returns `[{ id, file, builtin, size }]`，同名时用户目录的那份胜出。
+ * @returns `[{ id, file, builtin, size, durationMs }]`，同名时用户目录的那份胜出。
+ *   `durationMs` 判不出来时为 null（页面会退回兜底时长）。
  */
 export function listSounds(options) {
   const byId = new Map()
@@ -223,14 +418,17 @@ export function listSounds(options) {
       if (SOUND_ID_PATTERN.test(id) !== true) continue
       if (byId.has(id)) continue // 用户目录在前 ⇒ 同名时它胜出
       let size = 0
+      let mtimeMs = 0
+      const file = join(dir, name)
       try {
-        const stat = statSync(join(dir, name))
+        const stat = statSync(file)
         if (!stat.isFile()) continue
         size = stat.size
+        mtimeMs = stat.mtimeMs
       } catch {
         continue
       }
-      byId.set(id, { id, file: join(dir, name), builtin, size })
+      byId.set(id, { id, file, builtin, size, durationMs: cachedDurationMs(file, size, mtimeMs, ext) })
     }
   }
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -280,11 +478,14 @@ export const TOAST_TAGS = Object.freeze({
  * 画一次落在 `%PUBLIC%\DoneVoice\icons\`（必须是 ASCII 路径，见 `iconDir`），之后复用。
  */
 export const TOAST_ICONS = Object.freeze({
-  completion: Object.freeze({ file: 'complete', color: '#2EA043', glyph: '✓' }), // 绿勾：跑完了
-  approval: Object.freeze({ file: 'approve', color: '#D29922', glyph: '!' }), //   琥珀叹号：等你许可
-  question: Object.freeze({ file: 'question', color: '#4D6BFE', glyph: '?' }), //  蓝问号：等你回答
-  failure: Object.freeze({ file: 'failure', color: '#F85149', glyph: '✕' }), //    红叉：出错了
-  test: Object.freeze({ file: 'test', color: '#4D6BFE', glyph: '✓' }), //         测试用蓝勾
+  // 颜色**只从 ACCENT_COLORS 取**（host-config.js 里那唯一一份）。
+  // 原来这里硬编码一套、客户端再写一套，于是"同一个完成"在系统通知图标、
+  // 原生覆盖层竖条、右下角卡片图标三处是三个绿。
+  completion: Object.freeze({ file: 'complete', color: ACCENT_COLORS.completion, glyph: '✓' }), // 绿勾：跑完了
+  approval: Object.freeze({ file: 'approve', color: ACCENT_COLORS.approval, glyph: '!' }), //   琥珀叹号：等你许可
+  question: Object.freeze({ file: 'question', color: ACCENT_COLORS.question, glyph: '?' }), //  蓝问号：等你回答
+  failure: Object.freeze({ file: 'failure', color: ACCENT_COLORS.failure, glyph: '✕' }), //     红叉：出错了
+  test: Object.freeze({ file: 'test', color: ACCENT_COLORS.test, glyph: '✓' }), //              测试用蓝勾
 })
 
 /**
@@ -895,6 +1096,34 @@ function findAppExe(appRoot) {
 }
 
 /**
+ * 原生覆盖层（全屏边框光效 + 顶部提醒卡片）的 C# 源码路径。
+ *
+ * 为什么单独放一个 `.cs` 文件、而不是塞进这个 JS 文件当字符串：
+ *   1. 能**单独编译验证**（`Add-Type -Path` 一把跑通再接线），出问题不用猜；
+ *   2. 400 行 C# 嵌在 JS 模板字符串里会同时弄坏两边的可读性。
+ * 这份源码最终仍会被读成文本、拼进常驻 worker 的 PowerShell 脚本由它 `Add-Type` 编译。
+ * @returns 绝对路径。
+ */
+export function overlayScriptFile() {
+  return join(dirname(fileURLToPath(import.meta.url)), 'win-overlay.cs')
+}
+
+/**
+ * 读原生覆盖层的 C# 源码。
+ *
+ * **读不到就返回 null**（安装不完整、被安全软件删了……），由 worker 里那条命令
+ * 明确降级成 `overlay-error`，绝不让整条通知通道跟着陪葬。
+ * @returns 源码文本或 null。
+ */
+export function readOverlayScript() {
+  try {
+    return readFileSync(overlayScriptFile(), 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
  * 生成常驻 worker 的 PowerShell 脚本。
  *
  * 协议（全 ASCII 行协议，编码无关）：
@@ -924,6 +1153,9 @@ export function workerScript(options) {
   })
   // DSH 自己的应用图标（PNG）；有它就把通知图做成「DeepSeek 标志 + 按类别着色的外环」。
   const brandLogo = resolveBrandLogo(opt)
+  // 原生覆盖层（边框光效 + 顶部卡片）的 C# 源码：读不到就在 worker 里明确降级，
+  // 不让"少了一个文件"变成整条通知通道的死因。
+  const overlaySource = readOverlayScript()
   // 自己的进程名（PowerShell 的 ProcessName 不带 .exe）：用来判断"前台窗口是不是 DSH"。
   // 真机上宿主就跑在 `DeepSeek Harness.exe` 里，所以 process.execPath 的 basename 正是它。
   const selfExe = typeof opt.selfExe === 'string' && opt.selfExe !== '' ? opt.selfExe : process.execPath
@@ -1234,7 +1466,51 @@ export function workerScript(options) {
     '    return $out',
     '}',
     '',
-    '# —— 单条请求的处理（base64 解 JSON → 弹 toast → 放音 → 回执）。',
+    '# —— 原生覆盖层：全屏边框光效 + 顶部提醒卡片（Win32 分层窗口）。',
+    '#    为什么不用 WPF：本 worker 主循环**阻塞**读 stdin，没有消息泵，WPF 窗口渲染不出来。',
+    '#    分层窗口 + UpdateLayeredWindow 不需要泵也能上屏（见 win-overlay.cs 顶部说明）。',
+    '#    编译放在**首次用到时**（实测 ~320ms）：不拖慢 worker 的 READY，也就不拖慢 toast 与音效。',
+    '$script:overlaySource = ' + psLiteral(overlaySource === null ? '' : overlaySource),
+    '$script:overlayReady = $false',
+    '$script:overlayError = ' + psLiteral(overlaySource === null ? 'overlay-source-missing' : ''),
+    '$script:overlayDpi = 0.0',
+    'function EnsureOverlay {',
+    '    if ($script:overlayReady) { return $true }',
+    "    if ($script:overlaySource -eq '') { return $false }",
+    '    try {',
+    '        Add-Type -TypeDefinition $script:overlaySource -Language CSharp -ReferencedAssemblies System.Drawing | Out-Null',
+    '        $script:overlayReady = $true',
+    '        $script:overlayError = ' + psLiteral(''),
+    '    } catch {',
+    "        $script:overlayError = 'compile: ' + $_.Exception.Message",
+    '    }',
+    '    return $script:overlayReady',
+    '}',
+    '# DPI：覆盖层要按真实像素铺满整块虚拟屏；取不到就按 96 处理。',
+    'function OverlayDpi {',
+    '    if ($script:overlayDpi -le 0) {',
+    '        try {',
+    '            $info = [DvOverlay]::ScreenInfo() | ConvertFrom-Json',
+    '            $script:overlayDpi = [double]$info.dpi',
+    '        } catch { $script:overlayDpi = 96.0 }',
+    '        if ($script:overlayDpi -le 0) { $script:overlayDpi = 96.0 }',
+    '    }',
+    '    return $script:overlayDpi',
+    '}',
+    '# 找 DSH 主窗口句柄：点击覆盖层卡片后要把它拿回前台。',
+    '# 判据与 activate.ps1 **逐字一致**（拿 MainWindowHandle 不为 0 的那个进程），',
+    '# 所以"点系统通知"和"点覆盖层卡片"两条路不会给出不同答案。',
+    'function FindDshWindow {',
+    "    if ($script:selfName -eq '') { return [IntPtr]::Zero }",
+    '    try {',
+    '        foreach ($p in @(Get-Process -Name $script:selfName -ErrorAction SilentlyContinue)) {',
+    '            if ($p.MainWindowHandle -ne 0) { return $p.MainWindowHandle }',
+    '        }',
+    '    } catch { }',
+    '    return [IntPtr]::Zero',
+    '}',
+    '',
+    '# —— 单条请求的处理（base64 解 JSON → 弹 toast → 放音 → 画覆盖层 → 回执）。',
     'function Handle([string]$line) {',
     "    $parts = $line.Split(' ', 2)",
     '    $rid = $parts[0]',
@@ -1288,7 +1564,32 @@ export function workerScript(options) {
     "            $res.error = $res.error + ' | sound: ' + $_.Exception.Message",
     '        }',
     '    }',
-    '    $res.ok = ($res.toast -or $soundOnly)',
+    '    # 覆盖层排在**最后**：它的首次编译要 ~320ms，绝不能挡在 toast 与音效前面。',
+    '    if ($req.overlayHide -eq $true) {',
+    '        if (EnsureOverlay) { try { [void]([DvOverlay]::Hide()) } catch { } }',
+    "        $res.overlay = 'hidden'",
+    '    }',
+    '    if ($null -ne $req.overlay) {',
+    '        if (EnsureOverlay) {',
+    '            try {',
+    '                $dpi = OverlayDpi',
+    '                # fade 是**逻辑像素**（沿用页面版 16~110px 的手感），这里折成物理像素。',
+    '                $fade = [int][Math]::Round(([double]$req.overlay.fade) * $dpi / 96.0)',
+    '                # 末尾两个参数是"点击回到 DSH"用的：目标窗口句柄 + 点击标记路径。',
+    '                # 句柄拿不到时传 0 —— 那时只落标记，靠页面自己拿焦点（降级但仍可用）。',
+    '                $dsh = FindDshWindow',
+    '                $shown = [DvOverlay]::Show($dpi, $fade, [double]$req.overlay.intensity, [double]$req.overlay.speed, [int]$req.overlay.glowMs, [int]$req.overlay.cardMs, [string]$req.overlay.title, [string]$req.overlay.body, [string]$req.overlay.accent, ($dsh.ToInt64()), ' + psLiteral(clickMarkerFile(opt)) + ')',
+    '                $parsed = $shown | ConvertFrom-Json',
+    "                if ($parsed.ok -eq $true) { $res.overlay = 'shown' }",
+    "                else { $res.overlay = 'error'; $res.overlayError = [string]$parsed.error }",
+    '            } catch {',
+    "                $res.overlay = 'error'; $res.overlayError = $_.Exception.Message",
+    '            }',
+    '        } else {',
+    "            $res.overlay = 'error'; $res.overlayError = $script:overlayError",
+    '        }',
+    '    }',
+    "    $res.ok = ($res.toast -or $soundOnly -or ($res.overlay -eq " + psLiteral('shown') + '))',
     '    Say $rid ($res | ConvertTo-Json -Compress)',
     '}',
     '',
@@ -1607,11 +1908,11 @@ export function createNativeNotifier(options) {
     clearTimeout(entry.timer)
     // 前台探测的回执是"原样 JSON"，不走投递结果那套翻译。
     if (entry.presence === true) entry.resolve(payload !== null && typeof payload === 'object' ? payload : { present: false })
-    else entry.resolve(normalizeResult(payload, entry.wantSound, entry.soundOnly))
+    else entry.resolve(normalizeResult(payload, entry.wantSound, entry.soundOnly, entry.wantOverlay))
   }
 
   /** 把 worker 的回执翻译成冻结接口要求的 { delivered, degraded }。 */
-  function normalizeResult(payload, wantSound, soundOnly) {
+  function normalizeResult(payload, wantSound, soundOnly, wantOverlay) {
     const delivered = []
     const degraded = []
     const ok = payload !== null && typeof payload === 'object' ? payload : {}
@@ -1627,7 +1928,17 @@ export function createNativeNotifier(options) {
       else if (ok.skippedMinGap === true) degraded.push('sound-skipped')
       else degraded.push('sound-failed')
     }
+    // 覆盖层（边框光效 + 顶部卡片）**单独计**：它画失败不该让整条通知算失败 ——
+    // 系统通知与音效那条路照常送达，页面据此决定要不要补一张页内卡片。
+    if (wantOverlay) {
+      if (ok.overlay === 'shown') delivered.push('overlay')
+      else degraded.push('overlay-failed')
+    }
     if (ok.error) log('[donevoice] native 投递降级 — ' + String(ok.error))
+    // 覆盖层的失败原因**必须单独喊出来**：win-overlay.cs 是在 worker 里运行时 Add-Type
+    // **现场编译**的，一个语法错误只会让覆盖层静默地不出现。不把编译器的话原样打出来，
+    // 排查时只能靠猜（"选了顶部提醒却什么都没有"就是这么来的）。
+    if (ok.overlayError) log('[donevoice] 覆盖层不可用 — ' + String(ok.overlayError))
     return { delivered, degraded }
   }
 
@@ -1680,6 +1991,8 @@ export function createNativeNotifier(options) {
     value.toastGate = state.toastGate
     value.sounds = soundDir(opt)
     value.icons = iconDir(opt)
+    // 覆盖层最近一次的真实结果（没试过就是 untested）：排障时一眼看出是"没画"还是"画失败"。
+    value.overlay = state.lastOverlay ?? 'untested'
     return value
   }
 
@@ -1783,7 +2096,14 @@ export function createNativeNotifier(options) {
     // `soundOnly`：只播音效、不弹通知。用于"你在 DSH 页面上、但开了页内音效"那一档——
     // 那时不该有系统卡片（用户点名"我在工作状态，提醒多余"），但要能听见声音。
     const soundOnly = msg.soundOnly === true
-    if (soundOnly && soundRequest === null) {
+    // 原生覆盖层（顶部卡片 + 边框光效）的绘制参数；null = 这次不画。
+    // 它**不依赖** toast/sound：你正看着页面时系统通知按设计不弹，但覆盖层照样要画。
+    const overlay = msg.overlay !== null && typeof msg.overlay === 'object' ? msg.overlay : null
+    // 收起覆盖层（用户已经响应过时用，见 hideOverlay）。
+    const overlayHide = msg.overlayHide === true
+    // ⚠️ `overlayHide` 必须参与这个短路判断：它既没有音效也没有 overlay 参数，
+    //    漏掉的话请求根本不会发到 worker，"收起"就成了空操作。
+    if (soundOnly && soundRequest === null && overlay === null && overlayHide !== true) {
       // 没有可播的音效（静音/音量为 0/合成失败）⇒ 什么都不做，也不算失败。
       if (soundBroken) {
         state.failures += 1
@@ -1813,6 +2133,10 @@ export function createNativeNotifier(options) {
       sound: soundRequest === null ? null : { path: soundRequest.path, volume: soundRequest.volume },
       // true = 只播音效、不弹卡片（"你在页面上但开了页内音效"那一档）。
       soundOnly,
+      // 原生覆盖层：由 worker 用 Win32 分层窗口铺满整块屏幕画（见 win-overlay.cs）。
+      overlay,
+      // 收起覆盖层。与 overlay 互斥使用，不传时 worker 也不会碰它。
+      overlayHide,
     }
     const result = await new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -1829,6 +2153,7 @@ export function createNativeNotifier(options) {
         timer,
         wantSound: soundRequest !== null,
         soundOnly,
+        wantOverlay: overlay !== null,
       })
       const line = id + ' ' + Buffer.from(JSON.stringify(request), 'utf8').toString('base64') + '\n'
       const stdin = worker.child?.stdin
@@ -1919,6 +2244,57 @@ export function createNativeNotifier(options) {
     try { worker.child?.kill() } catch { /* 忽略 */ }
   }
 
-  const notifier = { notify, presence, release, status, dispose, aumid, warmup }
+  /**
+   * 只画原生覆盖层（边框光效 + 顶部卡片），**不弹系统通知、不播音效**。
+   *
+   * 存在理由：你正看着 DSH 页面时，系统通知按设计不弹；但那套"顶部卡片 + 边框流光"
+   * 的视觉现在改由宿主原生窗口来画（页面只负责递消息、不再自己画），所以这条路径必须单独能走。
+   * 复用 `deliver` 是为了继承同一套超时/降级/管道 pin 语义，少一套并行实现。
+   * @param spec `{ glowMs, cardMs, fade, intensity, speed, title, body, accent }`。
+   * @returns `{ shown, degraded }`；永不 reject。
+   */
+  async function overlay(spec) {
+    if (state.disposed) return { shown: false, degraded: ['disposed'] }
+    if (platform !== 'win32') return { shown: false, degraded: ['not-windows'] }
+    const args = spec !== null && typeof spec === 'object' ? spec : null
+    if (args === null) return { shown: false, degraded: ['bad-spec'] }
+    state.calls += 1
+    state.pendingNotifies += 1
+    applyPin()
+    try {
+      const result = await deliver({ kind: 'test', title: '', body: '', sound: null, soundOnly: true, overlay: args }, Date.now())
+      const shown = Array.isArray(result.delivered) && result.delivered.includes('overlay')
+      state.lastOverlay = shown ? 'shown' : 'failed:' + result.degraded.join(',')
+      return { shown, degraded: result.degraded }
+    } catch (error) {
+      state.lastOverlay = 'failed:threw'
+      return { shown: false, degraded: ['overlay-threw:' + String(error)] }
+    } finally {
+      state.pendingNotifies -= 1
+      applyPin()
+    }
+  }
+
+  /**
+   * 收起原生覆盖层（如果正显示着）。
+   *
+   * 为什么需要它：覆盖层是 `WS_EX_TOPMOST` 且**铺满整块屏幕**的。它会自然到期，
+   * 但用户**已经响应过**（点了系统通知、或点了覆盖层卡片）时就该立刻让开 ——
+   * 否则你回到桌面，还要看着一圈彩色边框和一张已经点过的卡片继续亮几秒。
+   *
+   * 与 C# 侧"点卡片自动收工"是两条路：那条是用户点了**覆盖层自己**，
+   * 这条是用户点了**系统通知**（覆盖层不知道），所以必须由页面侧触发。
+   * @returns 完成后的 Promise（永不 reject）；成功返回 true。
+   */
+  async function hideOverlay() {
+    try {
+      await deliver({ kind: 'test', title: '', body: '', sound: null, soundOnly: true, overlayHide: true }, Date.now())
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const notifier = { notify, presence, release, status, dispose, aumid, warmup, overlay, hideOverlay }
   return notifier
 }

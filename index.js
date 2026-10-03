@@ -31,20 +31,28 @@
  *
  * 旁证：本机已经跑起来的第三方插件（`dsh-status-rotator@0.29.0`、`dsh-prompt-studio`）
  * 的宿主半区**只 import `node:*` 内置模块**，配置各自落在 `$DSH_HOME/<id>/config.json`。
- * 本项目照这个已被验证可行的组合来做，并用 `test/validate.mjs` 静态钉死。
+ * 本项目照这个已被验证可行的组合来做，并在 `scripts/check-package.mjs` 里**静态扫描**钉死
+ * （扫所有宿主侧文件的顶层 import，出现裸包名就报红）。
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, extname, join } from 'node:path'
-import { DEFAULT_CONFIG, isSoundId, normalizeConfig } from './host-config.js'
+import { DEFAULT_CONFIG, clampInt, isSoundId, normalizeConfig } from './host-config.js'
 import { createHostSensors } from './host-sensors.js'
-import { MAX_SOUND_BYTES, SOUND_EXTS, SOUND_FILES, clickMarkerFile, clampVolume, createNativeNotifier, listSounds, soundDir, soundFileFor, soundIdFrom, userSoundDir } from './win-native.js'
+import { MAX_SOUND_BYTES, SOUND_EXTS, SOUND_FILES, TOAST_ICONS, clickMarkerFile, clampVolume, createNativeNotifier, listSounds, soundDir, soundFileFor, soundIdFrom, userSoundDir } from './win-native.js'
 
 /** Cordis 插件名（同时也是 Loader 条目 name 与客户端 bundle 握手 id）。 */
 export const name = 'donevoice'
 
-/** 版本（与 package.json / client.js 对齐，由 test/validate.mjs 钉住）。 */
-export const version = '1.1.3'
+/** 版本（与 package.json / client.js 对齐，由 `scripts/check-package.mjs` 钉住三处一致）。 */
+export const version = '1.2.0'
+
+/**
+ * 覆盖层去重窗口（毫秒）。
+ * 取 6 秒：比"顶部卡片最长停留 + 淡出"还宽一点，又不至于把用户真的连续两次操作吞掉
+ * （两次真事件之间通常隔着数秒以上，且不同 sessionId 本来就不互相影响）。
+ */
+export const OVERLAY_DEDUP_MS = 6000
 
 /** 配置读写路由。 */
 export const CONFIG_PATH = '/plugins/dsh-donevoice/config.json'
@@ -396,6 +404,92 @@ function soundFor(config) {
 }
 
 /**
+ * 边框光效的**兜底时长**（毫秒）：只在音效时长量不出来、或选了静音时才用。
+ *
+ * ⚠️ 它不是"边框的可调时长"—— 那条是**死逻辑**：正常路径下边框时长**完全等于**音效时长。
+ * 这个常量只是那条规则在信息缺失时的最后一档，**不暴露给用户、也不进设置页**。
+ */
+export const GLOW_FALLBACK_MS = 1600
+
+/** 边框光效的**下限**：再短的音效也别让边框一闪就没（人眼来不及感知）。 */
+export const GLOW_MIN_MS = 400
+
+/**
+ * 音效清单缓存时长。
+ *
+ * 为什么需要：`listSounds()` 每次都会 `readdirSync` + `statSync` 扫一遍音效目录，
+ * 而"这个音效多长"在**每次投递**时都要被问一次。用户导入/删除音效后最多 5 秒生效，
+ * 这个延迟对"边框跟多长"完全可以接受。
+ */
+const SOUND_CACHE_MS = 5000
+let soundCache = { at: 0, list: [] }
+
+/**
+ * 带缓存的音效清单。
+ * @returns `listSounds()` 的结果（最多 5 秒旧）。
+ */
+function cachedSounds() {
+  const now = Date.now()
+  if (now - soundCache.at > SOUND_CACHE_MS) soundCache = { at: now, list: listSounds() }
+  return soundCache.list
+}
+
+/**
+ * 当前配置选中的音效有多长（毫秒）。
+ * @param config - 生效配置。
+ * @returns 毫秒数；选了静音或量不出来返回 null。
+ */
+function soundDurationMs(config) {
+  const preset = config.soundPreset
+  if (preset === 'none' || !(config.volume > 0)) return null
+  const found = cachedSounds().find((item) => item.id === preset)
+  const value = found === undefined ? NaN : Number(found.durationMs)
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : null
+}
+
+/**
+ * 这次提醒要**呈现成什么样** —— **唯一的决策点**（纯函数，无副作用）。
+ *
+ * 为什么必须收敛到一处：这段逻辑原来散在宿主 `overlayFor` 与页面 `glowDurationFor` 两处，
+ * 各自算时长 / 兜底 / 下限（宿主 1800 / 600，页面 1600 / 400），于是同一条
+ * "边框跟随音效消失"的死逻辑能算出两个不同的数。现在**宿主算一次**，
+ * 随回执交给页面，页面不再自己猜。
+ *
+ * ⚠️ `overlay === null` **不等于**"这次不呈现"：
+ *   · `style === 'card'`（右下角）⇒ 卡片归页面 DOM 画，宿主这边没有覆盖层要做；
+ *   · 到底呈不呈现由 `pageCard` 决定（见 `deliverOnce` 的 present 分支）。
+ * @param config - 归一化后的配置。
+ * @param event - 已描述好的事件（含 kind / title / body）。
+ * @returns `{ style, overlay, cardMs }`。
+ */
+function resolvePresentation(config, event) {
+  const style = config.noticeStyle === 'topCard' ? 'topCard' : 'card'
+  const cardMs = clampInt(config.cardDurationSec, 3, 30, 6) * 1000
+  if (style !== 'topCard') return { style, overlay: null, cardMs }
+  // 边框时长：**死逻辑** —— 等于音效时长。`edgeGlow` 关着就是 0（不画边框，只出卡片）。
+  const measured = soundDurationMs(config)
+  const glowMs = config.edgeGlow === true
+    ? Math.max(GLOW_MIN_MS, measured === null ? GLOW_FALLBACK_MS : measured)
+    : 0
+  return {
+    style,
+    cardMs,
+    overlay: {
+      glowMs,
+      cardMs,
+      fade: clampInt(config.glowFade, 16, 110, 46),
+      intensity: clampInt(config.glowIntensity, 30, 100, 100) / 100,
+      speed: clampInt(config.glowSpeed, 30, 220, 100),
+      title: String(event.title ?? ''),
+      body: String(event.body ?? ''),
+      // 强调色与系统通知图标**同一套**（TOAST_ICONS）—— 不再各维护一份调色板，
+      // 否则原生卡片和右下角卡片的"完成绿"会是两个绿。
+      accent: (TOAST_ICONS[event.kind] ?? TOAST_ICONS.test).color,
+    },
+  }
+}
+
+/**
  * 投递一条提醒。
  *
  * 门禁顺序（每一道都返回**原因码**，绝不静默）：
@@ -422,6 +516,43 @@ export async function deliver(event, config, opts) {
   }
 }
 
+/**
+ * 覆盖层专用去重：`kind|sessionId` → 最近一次真正画上去的时刻。
+ *
+ * 为什么它必须**独立于**通知去重：你在页面上这条路径按设计**不占用**通知去重名额
+ * （占了的话页内卡片就永远画不出来，见下面 present 分支的说明），
+ * 于是"宿主传感器"与"页面中继"完全可能为同一件事各来一次 —— 通知那边靠 dedupKey 兜住，
+ * 覆盖层这边就得自己记一笔，否则会连画两遍边框与顶部卡片。
+ */
+const overlayShownAt = new Map()
+
+/**
+ * 这件"事"刚刚是不是已经画过覆盖层了。
+ * @param key - `kind|sessionId`。
+ * @returns 画过（且在 TTL 内）返回 true。
+ */
+function overlayRecentlyShown(key) {
+  const at = overlayShownAt.get(key)
+  if (at === undefined) return false
+  if (Date.now() - at > OVERLAY_DEDUP_MS) {
+    overlayShownAt.delete(key)
+    return false
+  }
+  return true
+}
+
+/**
+ * 记下"这件事的覆盖层刚画过"。
+ *
+ * ⚠️ **两条分支（present / away）都必须调它**。原先只在 present 分支记，
+ * 于是"present 画一次 → 用户切走 → 页面中继到达 → away 再画一次"会出双份边框与卡片 ——
+ * 而 `findDuplicate` 兜不住这条，因为 present 分支**故意不 rememberDelivery**。
+ * @param key - `kind|sessionId`。
+ */
+function markOverlayShown(key) {
+  overlayShownAt.set(key, Date.now())
+}
+
 async function deliverOnce(event, config, opts) {
   const now = Date.now()
   const options = opts !== null && typeof opts === 'object' ? opts : {}
@@ -443,25 +574,80 @@ async function deliverOnce(event, config, opts) {
   //   判据是 Windows 前台窗口属于哪个进程（见 win-native.js 的 presence()）——必须由宿主判断：
   //   宿主传感器不依赖页面，页面没开/被冻结时也照跑，靠页面报告焦点在那些情况下会失效。
   //   探测失败一律按"不在"处理（宁可多弹一条，也不漏提醒）。
+  // 「顶部提醒」那套"整块屏幕边框 + 桌面顶部卡片"由宿主原生窗口画（见 win-overlay.cs）；
+  // 选了右下角卡片形态时这里是 null，一切照旧走页面那条路。
+  const presentation = resolvePresentation(config, event)
+  const overlayKey = event.kind + '|' + event.sessionId
+
   {
     const probe = await getNotifier().presence()
     if (probe.present === true) {
       const quietStarted = Date.now()
-      // 你在页面上：**什么都不做**（用户定稿："我在工作状态，能看到任务，提醒多余"）。
-      // 页内卡片由 JS 半区自己渲染（它拿到 suppressed 回执后按 `pageCard` 决定）。
-      // 页内音效没有开关了 ⇒ 页面上保持安静；要声音就切走，那条是强制的。
-      const result = { delivered: [], degraded: [], suppressed: 'present', soundPlayed: false, deduped: false, latencyMs: Date.now() - quietStarted }
-      // ⚠️ 这里**故意不 rememberDelivery**：什么都没投递，不该占用"已处理"名额。
-      //    否则页面随后的中继会被判成 deduped，页内卡片就没机会渲染（`pageCard` 会失效）。
+      // ★ `pageCard` 在两种形态下**语义统一**：它就是"要不要在 DSH 页面内也呈现"。
+      //   关着 ⇒ 页面上什么都不出（保持安静）；开着 ⇒ 顶部形态画原生覆盖层、
+      //   右下角形态由页面自己画 DOM 卡片（宿主这边 `overlay === null`）。
+      const wantVisual = config.pageCard === true
+      let overlayShown = false
+      if (wantVisual && presentation.overlay !== null && overlayRecentlyShown(overlayKey) !== true) {
+        try {
+          const drawn = await getNotifier().overlay(presentation.overlay)
+          overlayShown = drawn !== null && drawn.shown === true
+          if (overlayShown) markOverlayShown(overlayKey)
+        } catch (error) {
+          console.warn('[donevoice] 原生覆盖层绘制失败 — ' + String(error))
+        }
+      }
+      // 覆盖层没画成 ⇒ **兜底弹系统通知**，而不是什么都不做。
+      // 这是删掉页面 DOM 顶部卡片之后**唯一**的兜底 —— 否则"选了顶部提醒却什么都看不见"。
+      // 它可点、能回到会话，比一片空白强得多（"降级必须可见"）。
+      const overlayFailed = wantVisual && presentation.overlay !== null && overlayShown !== true
+      // 页内音效（`pageSound`）：**由宿主播**，不再挂在"页面画了卡片"上 ——
+      // 那样会让它在顶部形态下永远不生效（宿主画了覆盖层 ⇒ 页面不画卡片 ⇒ 音效永不响）。
+      const needSound = config.pageSound === true
+      let fallbackToast = false
+      let pageSounded = false
+      if (overlayFailed || needSound) {
+        try {
+          // 兜底通知与页内音效合成**一次**往返：worker 本来就支持"只要音效不弹卡片"。
+          const outcome = await getNotifier().notify({
+            kind: event.kind,
+            title: overlayFailed ? event.title : '',
+            body: overlayFailed ? event.body : '',
+            sound: needSound ? soundFor(config) : null,
+            soundOnly: overlayFailed !== true,
+            overlay: null,
+          })
+          const got = Array.isArray(outcome?.delivered) ? outcome.delivered : []
+          fallbackToast = got.includes('toast')
+          pageSounded = got.includes('sound')
+        } catch (error) {
+          console.warn('[donevoice] 覆盖层兜底通知 / 页内音效失败 — ' + String(error))
+        }
+      }
+      const result = {
+        delivered: fallbackToast ? ['toast'] : [],
+        degraded: overlayFailed ? ['overlay-failed'] : [],
+        suppressed: 'present',
+        soundPlayed: pageSounded,
+        overlayShown,
+        pageSounded,
+        deduped: false,
+        latencyMs: Date.now() - quietStarted,
+      }
+      // ⚠️ 只有"真的弹了兜底通知"才 rememberDelivery：那时占用"已处理"名额是对的，
+      //    否则页面随后的中继会再弹一条，变成两条系统通知。
+      //    没弹通知时**故意不记** —— 记了页面中继会被判 deduped，页内卡片就没机会渲染。
+      if (fallbackToast) rememberDelivery(event, now)
       recordDelivery({
         kind: event.kind,
         sessionId: event.sessionId,
         source: event.source,
-        delivered: [],
-        degraded: [],
+        delivered: result.delivered,
+        degraded: result.degraded,
         deduped: false,
         suppressed: 'present',
-        soundPlayed: false,
+        soundPlayed: pageSounded,
+        overlayShown,
         foreground: probe.foreground,
         latencyMs: result.latencyMs,
         at: now,
@@ -477,20 +663,55 @@ async function deliverOnce(event, config, opts) {
   }
 
   const started = Date.now()
+  // 走开这条：覆盖层要不要**再画一次**，取决于刚才在页面上时是不是已经画过。
+  // 不判这一下就会出现"present 画一次 → 用户切走 → 中继到达 → away 再画一次"的双份边框与卡片。
+  // ⚠️ 只压**覆盖层**，不压系统通知 —— 你确实走开了，通知该弹还是要弹。
+  const awayOverlay = presentation.overlay !== null && overlayRecentlyShown(overlayKey) !== true
+    ? presentation.overlay
+    : null
+  // ★ 两种形态是**替代关系**，不是叠加。
+  //   用户定稿："顶部提醒和右下角提醒同时出现了……应该是只能有一方出现，另一方必须是不发生。"
+  //   所以这条路径分成两半：
+  //     · 要画覆盖层 ⇒ **只画覆盖层 + 照常出声**，系统通知不发（回会话靠点覆盖层卡片，已接通）；
+  //     · 不画覆盖层 ⇒ 照旧系统通知 + 音效。
+  //   覆盖层万一没画成，下面会**补发**一条系统通知，所以不会漏提醒。
+  const wantsToast = awayOverlay === null
   let outcome
   try {
     outcome = await getNotifier().notify({
       kind: event.kind,
-      title: event.title,
-      body: event.body,
+      title: wantsToast ? event.title : '',
+      body: wantsToast ? event.body : '',
       sound: soundFor(config),
+      // soundOnly = 只出声、不弹卡片；覆盖层是**另一条**通道，与它并行。
+      soundOnly: wantsToast !== true,
+      overlay: awayOverlay,
     })
   } catch (error) {
     console.error('[donevoice] 原生通知通道抛异常 — ' + String(error))
     outcome = { delivered: [], degraded: ['notifier-threw'] }
   }
-  const delivered = Array.isArray(outcome?.delivered) ? outcome.delivered.filter((item) => typeof item === 'string') : []
+  let delivered = Array.isArray(outcome?.delivered) ? outcome.delivered.filter((item) => typeof item === 'string') : []
   const degraded = Array.isArray(outcome?.degraded) ? outcome.degraded.filter((item) => typeof item === 'string') : []
+  // 覆盖层这一支也要记账，否则 present → away 那条路会漏（见 markOverlayShown 的说明）。
+  if (delivered.includes('overlay')) markOverlayShown(overlayKey)
+  // 覆盖层没画成 ⇒ **补发**系统通知。否则"替代关系"就变成了"两边都没有"。
+  // 只补通知不补音效（音效上面那次请求里已经播过了）。
+  if (awayOverlay !== null && delivered.includes('overlay') !== true) {
+    try {
+      const retry = await getNotifier().notify({
+        kind: event.kind,
+        title: event.title,
+        body: event.body,
+        sound: null,
+        overlay: null,
+      })
+      const got = Array.isArray(retry?.delivered) ? retry.delivered : []
+      if (got.includes('toast')) delivered = delivered.concat(['toast'])
+    } catch (error) {
+      console.warn('[donevoice] 覆盖层失败后的兜底通知也失败了 — ' + String(error))
+    }
+  }
   const result = { delivered, degraded, deduped: false, latencyMs: Date.now() - started }
   // ⚠️ **只有真的投递成功才占用去重名额**。
   //    曾经无条件记账，导致"弹失败的那条"把名额占了：紧接着重试/另一条通道来的同一件事
@@ -822,7 +1043,10 @@ async function soundsHandler(req, res) {
       ok: true,
       dir: userSoundDir(),
       builtinDir: soundDir(),
-      sounds: list.map((item) => ({ id: item.id, builtin: item.builtin, size: item.size })),
+      // `durationMs` 是给页内「边框光效」用的：那条效果有一条死逻辑——
+      // 存在时长必须**完全等于**通知音效的时长，而页面拿不到音效文件（在磁盘上），
+      // 所以时长只能由宿能量出来、随这份清单一起给。判不出来时为 null，页面退回兜底值。
+      sounds: list.map((item) => ({ id: item.id, builtin: item.builtin, size: item.size, durationMs: item.durationMs })),
     }), method === 'HEAD')
     return
   }
@@ -1057,6 +1281,9 @@ async function healthHandler(req, res) {
           payload.clicked = true
           payload.clickedAt = stamp
           clickHits += 1
+          // 用户已经响应过这条提醒了 ⇒ 让原生覆盖层立刻让开。
+          // 覆盖层自己只知道"用户点了我"，不知道"用户点了系统通知" —— 那条只能由这里补。
+          void getNotifier().hideOverlay()
           lastClick = { at: stamp, sessionId: lastSystemDelivery?.sessionId ?? '', kind: lastSystemDelivery?.kind ?? null }
           // 会话 id 取宿主记录的那条最近投递 —— 点击发生时你收到的通知就是它。
           payload.sessionId = lastClick.sessionId
