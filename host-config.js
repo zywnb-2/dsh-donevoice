@@ -67,7 +67,7 @@ export const ENUM_FIELDS = Object.freeze({
    */
   noticeStyle: Object.freeze(['card', 'topCard']),
   /**
-   * 提示音：**插件自带的 15 个真实音效**（`sounds/*.mp3`）+ 用户自己导入的 + `none` 静音。
+   * 提示音：**插件自带的 48 个真实音效**（`sounds/*.mp3` + `sounds/*.wav`）+ 用户自己导入的 + `none` 静音。
    *
    * ⚠️ 这份清单现在只作为**自带的默认集合**（用于客户端离线时的回落列表）。
    * 合法值的判定已改成**按 id 语法**（见 `isSoundId`）——因为用户可以自由导入/删除音效，
@@ -77,7 +77,13 @@ export const ENUM_FIELDS = Object.freeze({
    */
   soundPreset: Object.freeze([
     'bell', 'ping', 'ping2', 'notify1', 'notify2', 'notify3', 'type20', 'msgping',
-    'new017', 'new018', 'new02', 'new027', 'new03', 'positive', 'system02', 'none',
+    'new017', 'new018', 'new02', 'new027', 'new03', 'positive', 'system02',
+    'ethereal_notify', 'ethereal_message', 'ethereal_error', 'notify_clean', 'dingdong', 'chime2', 'shortmsg', 'popup',
+    'prompt', 'error', 'deny', 'click', 'toggle', 'mechanical_click', 'bubble', 'marimba',
+    'arcade_powerup', 'kalimba', 'laser_zap', 'typewriter', 'pluck_bass', 'celesta', 'coin', 'sonar_ping',
+    'wood_tock', 'warp_sweep', 'heartbeat', 'ringtone_retro', 'glass_ping', 'step_click', 'bass_drop', 'sparkle_arp',
+    'mute_tap',
+    'none',
   ]),
 })
 

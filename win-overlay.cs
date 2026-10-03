@@ -127,6 +127,27 @@ public static class DvOverlay
     /// <summary>当前卡片的命中矩形（**屏幕坐标**，物理像素）。</summary>
     static RectangleF hitRect = RectangleF.Empty;
 
+    // ── 边框演示（设置页点「应用」时用）─────────────────────────────────────
+    // 与提醒走的是**同一个覆盖层实现**（同一个 RunOverlay、同一份几何），只有三点不同：
+    //   · 活参数 —— 渲染循环每帧读下面三个值，改完下一帧就见效，**不重启窗口**；
+    //   · 不画卡片、不按 glowMs 淡出 —— 一直亮着，到 `previewMs` 那一刻整圈收掉；
+    //   · 相位按**时间累积**推进（而不是 `el % spinMs`），所以中途改流速颜色不会跳一下。
+    static readonly object previewGate = new object();
+    static int previewFade = 46;
+    static double previewIntensity = 1.0;
+    static double previewSpeed = 100.0;
+    /// <summary>一次演示持续多久（毫秒）。页面点「应用」时给，默认 <see cref="DefaultDemoMs"/>。</summary>
+    static int previewMs = DefaultDemoMs;
+
+    /// <summary>设置页演示的固定时长：**10 秒**（用户点名）。</summary>
+    const int DefaultDemoMs = 10000;
+
+    /// <summary>fade 的合法区间（**物理**像素，与 <see cref="RunOverlay"/> 里那条一致）。</summary>
+    static int ClampFade(int fade)
+    {
+        return Math.Max(1, Math.Min(220, fade));
+    }
+
     public static string ScreenInfo()
     {
         try { SetProcessDPIAware(); } catch { }
@@ -150,11 +171,14 @@ public static class DvOverlay
     {
         bool alive;
         lock (gate) { alive = thread != null && thread.IsAlive; }
+        int pFade;
+        lock (previewGate) { pFade = previewFade; }
         int age = 0;
         long t = Interlocked.Read(ref shownAtTicks);
         if (t != 0) age = (int)((DateTime.UtcNow.Ticks - t) / TimeSpan.TicksPerMillisecond);
         return "{\"alive\":" + (alive ? "true" : "false") + ",\"ok\":" + (lastOk ? "true" : "false")
-            + ",\"frames\":" + frames + ",\"lastFrameMs\":" + lastFrameMs + ",\"ageMs\":" + age + "}";
+            + ",\"frames\":" + frames + ",\"lastFrameMs\":" + lastFrameMs + ",\"ageMs\":" + age
+            + ",\"previewFade\":" + pFade + "}";
     }
 
     // ── 点击：命中测试 / 窗口过程 / 回到 DSH ──────────────────────────────────
@@ -351,7 +375,15 @@ public static class DvOverlay
     /// 只清 `fade` 宽的话，光效结束后角上会留下一圈残影。
     static void ClearStrips(byte[] buf, int stride, int w, int h, int fade)
     {
-        int span = BandSpan(fade);
+        ClearStripsSpan(buf, stride, w, h, BandSpan(fade));
+    }
+
+    /// <summary>
+    /// 同 <see cref="ClearStrips"/>，但条带宽度直接给 —— 预览专用：参数一变，可画范围就跟着变，
+    /// 得按**两帧里更大的那个**清，否则上一帧画过、这一帧不再画的地方会留下残影。
+    /// </summary>
+    static void ClearStripsSpan(byte[] buf, int stride, int w, int h, int span)
+    {
         ClearBox(buf, stride, w, h, new RectangleF(0, 0, w, span));
         ClearBox(buf, stride, w, h, new RectangleF(0, h - span, w, span));
         ClearBox(buf, stride, w, h, new RectangleF(0, span, span, h - span * 2));
@@ -972,10 +1004,86 @@ public static class DvOverlay
         int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
         if (vw <= 0 || vh <= 0) return "{\"ok\":false,\"error\":\"no-screen\"}";
 
+        return StartOverlay(gen, vx, vy, vw, vh, dpi, fade, intensity, speedPct, glowMs, cardMs, title, body,
+                            accentHex, dshHwnd, markerPath, false);
+    }
+
+    /// <summary>
+    /// 开始「边框演示」：只画整屏边框，不画卡片，**亮满 <paramref name="durationMs"/> 毫秒后自己收掉**。
+    ///
+    /// 与 <see cref="Show"/> 共用同一条线程体（<see cref="RunOverlay"/>）—— 窗口、几何、合成
+    /// 全部同源，所以演示看到的**就是**提醒时那一圈边框，不存在"演示一套、实际另一套"。
+    /// </summary>
+    /// <param name="dpi">屏幕 DPI。</param>
+    /// <param name="fade">羽化宽度（**物理**像素，调用方已折算）。</param>
+    /// <param name="intensity">浓度 0..1。</param>
+    /// <param name="speedPct">流速百分比（100 = 一圈 7.5s）。</param>
+    /// <param name="durationMs">演示时长（毫秒）；≤0 时退回 <see cref="DefaultDemoMs"/>（10 秒）。</param>
+    /// <returns>与 Show 同形的 JSON。</returns>
+    public static string ShowPreview(double dpi, int fade, double intensity, double speedPct, int durationMs)
+    {
+        int gen;
+        Thread old;
+        lock (gate)
+        {
+            generation += 1;
+            gen = generation;
+            old = thread;
+            thread = null;
+        }
+        // Join 必须在锁外，理由同 Show（见那里的说明）。
+        if (old != null && old.IsAlive)
+        {
+            try { old.Join(400); } catch { }
+        }
+        lock (previewGate)
+        {
+            previewFade = ClampFade(fade);
+            previewIntensity = intensity;
+            previewSpeed = speedPct;
+            previewMs = durationMs > 0 ? durationMs : DefaultDemoMs;
+        }
+
+        try { SetProcessDPIAware(); } catch { }
+        int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+        if (vw <= 0 || vh <= 0) return "{\"ok\":false,\"error\":\"no-screen\"}";
+
+        // glowMs / cardMs 传 0：演示分支根本不看它们（按 durationMs 收工、不画卡片）。
+        return StartOverlay(gen, vx, vy, vw, vh, dpi, fade, intensity, speedPct, 0, 0, "", "", "", 0, null, true);
+    }
+
+    /// <summary>
+    /// 改预览参数。**不重启窗口** —— 只把这几个值写进静态字段，渲染线程下一帧自会读到。
+    /// 这是"拖滑条时画面连续变化，而不是一遍遍闪"的关键。
+    /// </summary>
+    /// <param name="fade">羽化宽度（物理像素）。</param>
+    /// <param name="intensity">浓度 0..1。</param>
+    /// <param name="speedPct">流速百分比。</param>
+    /// <returns>`{"ok":true,...}`；没有在跑的预览返回 `not-running`（页面据此重开一次）。</returns>
+    public static string UpdatePreview(int fade, double intensity, double speedPct)
+    {
+        bool alive;
+        lock (gate) { alive = thread != null && thread.IsAlive; }
+        if (!alive) return "{\"ok\":false,\"error\":\"not-running\"}";
+        int f = ClampFade(fade);
+        lock (previewGate)
+        {
+            previewFade = f;
+            previewIntensity = intensity;
+            previewSpeed = speedPct;
+        }
+        return "{\"ok\":true,\"fade\":" + f + "}";
+    }
+
+    /// <summary>起渲染线程 —— <see cref="Show"/> 与 <see cref="ShowPreview"/> 共用，差别只在最后那个标志。</summary>
+    static string StartOverlay(int gen, int vx, int vy, int vw, int vh, double dpi, int fade, double intensity,
+                               double speedPct, int glowMs, int cardMs, string title, string body, string accentHex,
+                               long dshHwnd, string markerPath, bool preview)
+    {
         var t = new Thread(delegate ()
         {
             RunOverlay(gen, vx, vy, vw, vh, dpi, fade, intensity, speedPct, glowMs, cardMs, title, body, accentHex,
-                       dshHwnd, markerPath);
+                       dshHwnd, markerPath, preview);
         });
         t.IsBackground = true;
         t.SetApartmentState(ApartmentState.MTA);
@@ -995,10 +1103,17 @@ public static class DvOverlay
         return "{\"ok\":true,\"hidden\":true,\"gen\":" + gen + "}";
     }
 
+    /// <summary>一圈流光的毫秒数：流速 100% = 7.5s。</summary>
+    static double SpinMs(double speedPct)
+    {
+        return 7500.0 / (Math.Max(30.0, Math.Min(220.0, speedPct)) / 100.0);
+    }
+
     /// <summary>覆盖层线程主体：建窗 → 每帧合成 → UpdateLayeredWindow → 到时销毁。</summary>
+    /// <param name="preview">true = 边框演示：活参数、不画卡片、亮满 durationMs 后收工（见 <see cref="ShowPreview"/>）。</param>
     static void RunOverlay(int gen, int vx, int vy, int vw, int vh, double dpi, int fade, double intensity,
                            double speedPct, int glowMs, int cardMs, string title, string body, string accentHex,
-                           long dshHwnd, string markerPath)
+                           long dshHwnd, string markerPath, bool preview)
     {
         IntPtr hwnd = IntPtr.Zero;
         lastOk = false;
@@ -1013,8 +1128,11 @@ public static class DvOverlay
         hitRect = RectangleF.Empty;
         try { SetProcessDPIAware(); } catch { }
 
-        int fadeI = Math.Max(1, Math.Min(220, fade));
-        double spinMs = 7500.0 / (Math.Max(30.0, Math.Min(220.0, speedPct)) / 100.0);
+        int fadeI = ClampFade(fade);
+        // ★ 这三个在预览下会被**每帧重读**（活参数）；提醒路径自始至终不变。
+        double intensityNow = intensity;
+        double speedNow = speedPct;
+        double spinMs = SpinMs(speedNow);
         // 淡出占光效时长的 35%（上限 450ms、下限 120ms），与页面版同一条规则。
         int glowFadeMs = Math.Max(120, Math.Min(450, (int)Math.Round(glowMs * 0.35)));
         int appearMs = 220;
@@ -1025,6 +1143,19 @@ public static class DvOverlay
         int[] pal = BuildPalette();
         // 角度相位表**只算一次**（Atan2 很贵，每帧算扛不住）；见 PhaseTable 的说明。
         byte[] phaseTab = PhaseTable(vw, vh, fadeI);
+        // ★ 预览的相位是**累积**推进的（提醒路径仍是 `el % spinMs`）。两者在 spinMs 不变时
+        //   逐帧等价；但改流速的那一刻，累积量保证颜色**不跳**，只是转得快/慢起来 ——
+        //   这正是"拖流速滑条"该有的手感，而 `el % spinMs` 会当场闪一下。
+        double phaseAcc = 0.0;
+        long lastEl = 0;
+        // 预览要按"两帧里更大的 span"清条带，所以记住上一帧的 fade。
+        int clearFade = fadeI;
+        // ★ 演示的收工时刻 = 启动那一刻 + 页面给的固定时长（10s）。**读一次**即可：
+        //   它是这次演示的属性，不像 fade/浓度/流速那样要在过程中反复改。
+        int demoMs;
+        lock (previewGate) { demoMs = previewMs; }
+        long previewDeadline = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond
+            + (demoMs > 0 ? demoMs : DefaultDemoMs);
         using (var bmp = new Bitmap(vw, vh, PixelFormat.Format32bppPArgb))
         {
             IntPtr screenDc = GetDC(IntPtr.Zero);
@@ -1049,26 +1180,78 @@ public static class DvOverlay
                     lock (gate) { curGen = generation; }
                     if (curGen != gen) break;
                     long el = sw.ElapsedMilliseconds;
-                    if (el > totalMs) break;
+                    if (preview)
+                    {
+                        // 到点收工：演示时长用完（页面点「应用」时给的，默认 10s）就把整圈收掉。
+                        if (DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond > previewDeadline) break;
+                        // ★ 活参数：每帧取一次，改完下一帧就见效，**不重启窗口**。
+                        //   fade 变了必须重建相位表 —— `PathRadius` 依赖 fade，颜色的周长参数
+                        //   也跟着它走；拿大 fade 的表去画小 fade，彩虹的疏密就对不上保存后的
+                        //   真实效果了（预览的全部意义就是"所见即所得"）。
+                        int wantFade;
+                        double wantIntensity, wantSpeed;
+                        lock (previewGate)
+                        {
+                            wantFade = previewFade;
+                            wantIntensity = previewIntensity;
+                            wantSpeed = previewSpeed;
+                        }
+                        wantFade = ClampFade(wantFade);
+                        if (wantFade != fadeI)
+                        {
+                            fadeI = wantFade;
+                            phaseTab = PhaseTable(vw, vh, fadeI);
+                        }
+                        intensityNow = wantIntensity;
+                        if (wantSpeed != speedNow)
+                        {
+                            speedNow = wantSpeed;
+                            spinMs = SpinMs(speedNow);
+                        }
+                    }
+                    else if (el > totalMs) break;
                     frameSw.Restart();
 
-                    double phase = (el % spinMs) / spinMs;
+                    double phase;
+                    if (preview)
+                    {
+                        phaseAcc += (el - lastEl) / spinMs;
+                        phaseAcc -= Math.Floor(phaseAcc);
+                        phase = phaseAcc;
+                    }
+                    else
+                    {
+                        phase = (el % spinMs) / spinMs;
+                    }
+                    lastEl = el;
                     // 光效整体透明度：进场 120ms 淡入 + 收尾按 glowFadeMs 淡出。
+                    // ★ 预览**不淡出** —— 它要一直亮着，直到页面说停。
                     double gAlpha = 1.0;
                     if (el < 120) gAlpha = el / 120.0;
-                    if (el > glowMs - glowFadeMs) gAlpha = Math.Min(gAlpha, Math.Max(0.0, (glowMs - el) / (double)glowFadeMs));
-                    if (el > glowMs) gAlpha = 0.0;
+                    if (!preview)
+                    {
+                        if (el > glowMs - glowFadeMs) gAlpha = Math.Min(gAlpha, Math.Max(0.0, (glowMs - el) / (double)glowFadeMs));
+                        if (el > glowMs) gAlpha = 0.0;
+                    }
 
                     double cAlpha = 1.0, cScale = 1.0;
-                    if (el < appearMs)
+                    if (preview)
                     {
-                        double k = el / (double)appearMs;
-                        cAlpha = k;
-                        // 果冻弹出：0.94 → 1.02 → 1.00（过冲后回弹）
-                        cScale = k < 0.7 ? 0.94 + (1.02 - 0.94) * (k / 0.7) : 1.02 - 0.02 * ((k - 0.7) / 0.3);
+                        // 调参预览只画边框，不画卡片（页面那边也就没有可点的东西）。
+                        cAlpha = 0.0;
                     }
-                    if (el > cardMs) cAlpha = Math.Max(0.0, 1.0 - (el - cardMs) / (double)cardExitMs);
-                    if (cardMs <= 0) cAlpha = 0.0;
+                    else
+                    {
+                        if (el < appearMs)
+                        {
+                            double k = el / (double)appearMs;
+                            cAlpha = k;
+                            // 果冻弹出：0.94 → 1.02 → 1.00（过冲后回弹）
+                            cScale = k < 0.7 ? 0.94 + (1.02 - 0.94) * (k / 0.7) : 1.02 - 0.02 * ((k - 0.7) / 0.3);
+                        }
+                        if (el > cardMs) cAlpha = Math.Max(0.0, 1.0 - (el - cardMs) / (double)cardExitMs);
+                        if (cardMs <= 0) cAlpha = 0.0;
+                    }
 
                     // 把"这一刻卡片在哪、有多不透明"交给 WndProc（它在同一线程被派发，读到的是本帧的值）。
                     // 卡片淡出后 hitAlpha 归零 ⇒ 命中测试一律 HTTRANSPARENT ⇒ 恢复全屏穿透。
@@ -1077,7 +1260,15 @@ public static class DvOverlay
 
                     // 位图每帧被整块 Marshal.Copy 覆盖，所以**不需要**清任何东西；
                     // 只有光效结束后要把四条边带清回全透明（否则最后一帧会留在屏幕上）。
-                    if (gAlpha > 0.002) DrawGlow(buf, vw * 4, vw, vh, fadeI, intensity * gAlpha, phase, pal, phaseTab);
+                    // ★ 预览是例外：参数一变可画范围就跟着变，上一帧画过、这一帧被 `d >= fade`
+                    //   跳过的地方会残留在 buffer 里 ⇒ 每帧先按"两帧里更大的 span"清一遍
+                    //   （1080p 约 1ms，只在预览时花这笔钱）。提醒路径参数恒定，没这个问题。
+                    if (preview)
+                    {
+                        ClearStripsSpan(buf, vw * 4, vw, vh, Math.Max(BandSpan(fadeI), BandSpan(clearFade)));
+                        clearFade = fadeI;
+                    }
+                    if (gAlpha > 0.002) DrawGlow(buf, vw * 4, vw, vh, fadeI, intensityNow * gAlpha, phase, pal, phaseTab);
                     else ClearStrips(buf, vw * 4, vw, vh, fadeI);
 
                     var data = bmp.LockBits(new Rectangle(0, 0, vw, vh), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
@@ -1120,8 +1311,8 @@ public static class DvOverlay
                         TranslateMessage(ref msg);
                         DispatchMessage(ref msg);
                     }
-                    // 点过了立刻收工：卡片马上消失，不等自然到期。
-                    if (clickRequested) break;
+                    // 点过了立刻收工：卡片马上消失，不等自然到期。（预览没有卡片可点，忽略。）
+                    if (!preview && clickRequested) break;
 
                     int sleep = 33 - lastFrameMs;
                     if (sleep > 0) Thread.Sleep(sleep);

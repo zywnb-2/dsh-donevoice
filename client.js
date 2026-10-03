@@ -76,7 +76,7 @@ window.__ModuleLoader__.load({
     /** 宿主 Loader 条目 id：同时是设置页槽位 id 与配置路由的归属名。必须与 cordis.patch.yml 一致。 */
     const HOST_ENTRY_ID = 'donevoice'
     /** 版本（与 package.json / 宿主半区对齐，由 `scripts/check-package.mjs` 钉住三处一致）。 */
-    const VERSION = '1.2.0'
+    const VERSION = '1.3.0'
     /**
      * 客户端构建标记：**每改一次 client.js 就加一**，并显示在设置页「诊断」第一行。
      *
@@ -281,6 +281,8 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: '提醒',
       'settings.title': '提醒',
+      'settings.groupLook': '外观',
+      'settings.groupSound': '声音',
       'settings.enabled': '总开关',
       'settings.noticeStyle': '通知形式',
       'settings.noticeStyle.card': '右下角提醒',
@@ -289,6 +291,12 @@ window.__ModuleLoader__.load({
       'settings.glowFade': '羽化',
       'settings.glowIntensity': '浓度',
       'settings.glowSpeed': '流速',
+      'settings.glowTuning': '边框特效',
+      'settings.glowAdjust': '调整',
+      'settings.glowCollapse': '收起',
+      'settings.glowApply': '应用',
+      'settings.glowDemoing': '演示中…',
+      'settings.glowStale': '宿主还是旧版插件，它不认识演示请求。请重载 dsh-donevoice 插件或重启 DSH。',
       'settings.pageCard': '页内卡片',
       'settings.cardDurationSec': '停留时间',
       'settings.pageSound': '页内音效',
@@ -308,6 +316,39 @@ window.__ModuleLoader__.load({
       'settings.sound.new03': '新通知 03',
       'settings.sound.positive': '轻快提示',
       'settings.sound.system02': '系统提示',
+      'settings.sound.ethereal_notify': '空灵·通知',
+      'settings.sound.ethereal_message': '空灵·消息',
+      'settings.sound.ethereal_error': '空灵·错误',
+      'settings.sound.notify_clean': '干净通知',
+      'settings.sound.dingdong': '叮咚',
+      'settings.sound.chime2': '风铃',
+      'settings.sound.shortmsg': '短消息',
+      'settings.sound.popup': '弹出',
+      'settings.sound.prompt': '提示',
+      'settings.sound.error': '错误',
+      'settings.sound.deny': '拒绝',
+      'settings.sound.click': '点击',
+      'settings.sound.toggle': '开关',
+      'settings.sound.mechanical_click': '机械键',
+      'settings.sound.bubble': '气泡',
+      'settings.sound.marimba': '马林巴',
+      'settings.sound.arcade_powerup': '街机升级',
+      'settings.sound.kalimba': '拇指琴',
+      'settings.sound.laser_zap': '激光',
+      'settings.sound.typewriter': '打字机',
+      'settings.sound.pluck_bass': '拨弦低音',
+      'settings.sound.celesta': '钢片琴',
+      'settings.sound.coin': '金币',
+      'settings.sound.sonar_ping': '声呐',
+      'settings.sound.wood_tock': '木鱼',
+      'settings.sound.warp_sweep': '跃迁',
+      'settings.sound.heartbeat': '心跳',
+      'settings.sound.ringtone_retro': '复古铃声',
+      'settings.sound.glass_ping': '玻璃叮',
+      'settings.sound.step_click': '步进',
+      'settings.sound.bass_drop': '低音下坠',
+      'settings.sound.sparkle_arp': '闪烁琶音',
+      'settings.sound.mute_tap': '静音轻点',
       'settings.sound.none': '静音',
       'settings.soundPreview': '试听',
       'settings.soundLibrary': '音效库',
@@ -331,6 +372,8 @@ window.__ModuleLoader__.load({
     const en = {
       nav: 'Reminders',
       'settings.title': 'Reminders',
+      'settings.groupLook': 'Appearance',
+      'settings.groupSound': 'Sound',
       'settings.enabled': 'Master switch',
       'settings.noticeStyle': 'Style',
       'settings.noticeStyle.card': 'Bottom-right reminder',
@@ -339,6 +382,12 @@ window.__ModuleLoader__.load({
       'settings.glowFade': 'Feather',
       'settings.glowIntensity': 'Intensity',
       'settings.glowSpeed': 'Speed',
+      'settings.glowTuning': 'Edge effect',
+      'settings.glowAdjust': 'Adjust',
+      'settings.glowCollapse': 'Collapse',
+      'settings.glowApply': 'Apply',
+      'settings.glowDemoing': 'Playing…',
+      'settings.glowStale': 'The host is still running an older build of this plugin and does not know the demo route. Reload dsh-donevoice or restart DSH.',
       'settings.pageCard': 'In-page card',
       'settings.cardDurationSec': 'Dwell time',
       'settings.pageSound': 'In-page sound',
@@ -358,6 +407,39 @@ window.__ModuleLoader__.load({
       'settings.sound.new03': 'New 03',
       'settings.sound.positive': 'Positive',
       'settings.sound.system02': 'System 02',
+      'settings.sound.ethereal_notify': 'Ethereal Notify',
+      'settings.sound.ethereal_message': 'Ethereal Message',
+      'settings.sound.ethereal_error': 'Ethereal Error',
+      'settings.sound.notify_clean': 'Clean Notify',
+      'settings.sound.dingdong': 'Ding Dong',
+      'settings.sound.chime2': 'Chime',
+      'settings.sound.shortmsg': 'Short Message',
+      'settings.sound.popup': 'Popup',
+      'settings.sound.prompt': 'Prompt',
+      'settings.sound.error': 'Error',
+      'settings.sound.deny': 'Deny',
+      'settings.sound.click': 'Click',
+      'settings.sound.toggle': 'Toggle',
+      'settings.sound.mechanical_click': 'Mechanical Click',
+      'settings.sound.bubble': 'Bubble',
+      'settings.sound.marimba': 'Marimba',
+      'settings.sound.arcade_powerup': 'Arcade Power-up',
+      'settings.sound.kalimba': 'Kalimba',
+      'settings.sound.laser_zap': 'Laser Zap',
+      'settings.sound.typewriter': 'Typewriter',
+      'settings.sound.pluck_bass': 'Plucked Bass',
+      'settings.sound.celesta': 'Celesta',
+      'settings.sound.coin': 'Coin',
+      'settings.sound.sonar_ping': 'Sonar Ping',
+      'settings.sound.wood_tock': 'Wood Tock',
+      'settings.sound.warp_sweep': 'Warp Sweep',
+      'settings.sound.heartbeat': 'Heartbeat',
+      'settings.sound.ringtone_retro': 'Retro Ringtone',
+      'settings.sound.glass_ping': 'Glass Ping',
+      'settings.sound.step_click': 'Step Click',
+      'settings.sound.bass_drop': 'Bass Drop',
+      'settings.sound.sparkle_arp': 'Sparkle Arp',
+      'settings.sound.mute_tap': 'Mute Tap',
       'settings.sound.none': 'Silent',
       'settings.soundPreview': 'Preview',
       'settings.soundLibrary': 'Sound library',
@@ -736,7 +818,7 @@ window.__ModuleLoader__.load({
     // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * 提示音 id 清单 —— **插件自带的 15 个真实音效**（`sounds/*.mp3`）+ `none` 静音。
+     * 提示音 id 清单 —— **插件自带的 48 个真实音效**（`sounds/*.mp3` + `sounds/*.wav`）+ `none` 静音。
      *
      * ⚠️ 必须与宿主的两份清单一致：`win-native.js` 的 `SOUND_FILES` 与
      *    `host-config.js` 的 `ENUM_FIELDS.soundPreset`。宿主启动时会自检并把结论写进探针。
@@ -746,7 +828,14 @@ window.__ModuleLoader__.load({
      */
     const SOUND_IDS = Object.freeze([
       'bell', 'ping', 'ping2', 'notify1', 'notify2', 'notify3', 'type20', 'msgping',
-      'new017', 'new018', 'new02', 'new027', 'new03', 'positive', 'system02', 'none',
+      'new017', 'new018', 'new02', 'new027', 'new03', 'positive', 'system02',
+      'ethereal_notify', 'ethereal_message', 'ethereal_error', 'notify_clean', 'dingdong', 'chime2',
+      'shortmsg', 'popup', 'prompt', 'error', 'deny', 'click',
+      'toggle', 'mechanical_click', 'bubble', 'marimba', 'arcade_powerup', 'kalimba',
+      'laser_zap', 'typewriter', 'pluck_bass', 'celesta', 'coin', 'sonar_ping',
+      'wood_tock', 'warp_sweep', 'heartbeat', 'ringtone_retro', 'glass_ping', 'step_click',
+      'bass_drop', 'sparkle_arp', 'mute_tap',
+      'none',
     ])
 
     // 合法值从清单派生：加了音效忘了改枚举这种静默回落，从结构上不会再发生。
@@ -1047,6 +1136,36 @@ window.__ModuleLoader__.load({
       '.dv-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:11px 13px;border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));border-radius:12px;background:var(--dsw-alias-bg-layer-1,#fff)}',
       '.dv-rowText{display:flex;flex:1 1 200px;flex-direction:column;gap:2px;min-width:0}',
       '.dv-rowTitle{color:var(--dsw-alias-label-primary,#1a1a1a);font-size:13px;line-height:20px;font-weight:500}',
+      // ── 分组卡片：把散落的行收成「外观 / 声音」两组 ──────────────────────────
+      //    每条行都自带边框时，一屏十几个方框会连成"一堵胶囊墙" —— 谁跟谁一类完全看不出来。
+      //    分组后同类行并进同一张卡、行间只用一根 hairline 分隔，层级一眼可见。
+      //
+      //    组头是 `<button>` 而不是 `<details>`：折叠状态由 React 独家掌握（可被"全部收起"
+      //    这类操作统一驱动），而且**内部行永远渲染**、只靠 CSS 隐藏 —— 校验脚本遍历的是
+      //    虚拟树（不看 CSS），永远渲染才能保证它永远找得到控件，不会因为"恰好收起了"而漏测。
+      //
+      //    组内行的扁平化靠"同特异性 + 写在后面"压过 `.dv-row` 自己的边框，不用 !important：
+      //    `.dv-groupBody>.dv-row` 与 `.dv-row` 各有 2 个类，特异性相同 ⇒ 源码顺序决定胜负。
+      '.dv-group{border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));border-radius:14px;background:var(--dsw-alias-bg-layer-1,#fff);overflow:hidden}',
+      '.dv-groupHead{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:9px 14px;border:0;border-bottom:1px solid var(--dsw-alias-border-l3,rgba(127,127,127,.16));background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.06));color:var(--dsw-alias-label-tertiary,rgba(0,0,0,.55));font:inherit;font-size:11px;line-height:18px;font-weight:600;letter-spacing:.08em;text-align:left;cursor:pointer}',
+      '.dv-groupHead:hover{color:var(--dsw-alias-label-secondary,rgba(0,0,0,.72))}',
+      '.dv-groupHead:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4d7ff5);outline-offset:-2px}',
+      '.dv-groupHead::after{content:"";flex:none;margin-left:auto;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--dsw-alias-label-secondary,rgba(0,0,0,.72));transition:transform .18s ease}',
+      '.dv-groupClosed .dv-groupHead{border-bottom:0}',
+      '.dv-groupClosed .dv-groupHead::after{transform:rotate(-90deg)}',
+      '.dv-groupClosed .dv-groupBody{display:none}',
+      // 扁平化：组内的行脱掉自己的方框，融进卡片。
+      '.dv-groupBody>.dv-row,.dv-groupBody>.dv-manage{border:0;border-radius:0;background:transparent}',
+      // hairline 分隔：只落在"不是第一项"的直接子元素上（`~` 只认后面的兄弟）。
+      '.dv-groupBody>.dv-row~*,.dv-groupBody>.dv-manage~*{border-top:1px solid var(--dsw-alias-border-l3,rgba(127,127,127,.16))}',
+      // 子项：「边框特效」跟着「边框光效」，缩进 + 更轻的字重，明确它是上一条的附属。
+      '.dv-groupBody>.dv-manageSub .dv-manageSum{padding:10px 14px 10px 30px;color:var(--dsw-alias-label-secondary,rgba(0,0,0,.72));font-size:12px;font-weight:400}',
+      // 子项**不留上面那根 hairline** —— 留着的话「边框光效」和「边框特效」会被画成两个
+      // 同级条目，缩进想表达的"父子"就白表达了。紧贴着父项、只靠缩进说话。
+      '.dv-groupBody>.dv-row+.dv-manageSub{border-top:0}',
+      // 展开体里的滑条行同样去框 —— 否则「卡中卡中卡」，三层方框套在一起最乱的就是这里。
+      '.dv-manageBody>.dv-row{border:0;border-radius:0;background:transparent;padding:8px 0}',
+      '.dv-manageBody>.dv-row+.dv-row{border-top:1px solid var(--dsw-alias-border-l3,rgba(127,127,127,.16))}',
       // ── 开关：**带"关/开"文字的滑块按钮**（用户点名：左边关、右边开，点击后旋钮左右移动）。
       //    仍然是**真的 <input type=checkbox>**（键盘可聚焦、可切换、读屏认），
       //    只是视觉上被隐藏、由紧随其后的 .dv-switch 呈现 —— 所以用 `~` 兄弟选择器驱动滑块状态。
@@ -1071,7 +1190,17 @@ window.__ModuleLoader__.load({
       '.dv-btn:disabled{opacity:.5;cursor:default}',
       '.dv-select{flex:none;height:30px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));border-radius:9px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1a1a1a);font:inherit;font-size:12px}',
       // 总开关单独一块：更重的边框 + 略强底色，视觉上明确"它是所有开关的上位"。
-      '.dv-master{border-color:var(--dsw-alias-brand-primary,#4d7ff5);background:var(--dsw-alias-bg-layer-2,rgba(77,127,245,.06));box-shadow:0 1px 2px rgba(0,0,0,.04)}',
+      // ⚠️ 这条得**自己**画边框/圆角/内边距：`.dv-master` 是包在 `ToggleRow` 外面的 div，
+      //    里面那个 `.dv-row` 才是带边框的元素。上一版只写了 `border-color` —— 外层 div
+      //    没有 border-style/width，颜色落了个空，于是"总开关"看起来和普通行一模一样。
+      // ⚠️ 底色必须是"**实心**底 + 品牌色蒙层"，**不能**直接用 `--dsw-alias-bg-layer-2`：
+      //    那个变量是**半透明**的（深色主题下是 rgba(255,255,255,.08)），一旦它成了最底层的
+      //    背景，就会去和页面背景叠加 —— 于是深色主题下这块变成**浅色**，而文字用的是
+      //    `--dsw-alias-label-primary`（浅色）⇒ 对比度归零，"总开关"三个字直接看不见。
+      //    实心 `bg-layer-1` 打底再用 linear-gradient 蒙 8% 品牌色，两种主题下都站得住。
+      '.dv-master{padding:11px 13px;border:1px solid var(--dsw-alias-brand-primary,#4d7ff5);border-radius:14px;background:var(--dsw-alias-bg-layer-1,#fff);background-image:linear-gradient(rgba(77,127,245,.09),rgba(77,127,245,.09))}',
+      '.dv-master>.dv-row{padding:0;border:0;border-radius:0;background:transparent}',
+      '.dv-master .dv-rowTitle{font-weight:600}',
       // 失效态：整行变灰 + 不可点（用户要求"灰色显示，表示无法点击"）。
       '.dv-off{opacity:.45}',
       '.dv-off *{cursor:not-allowed!important}',
@@ -1081,11 +1210,20 @@ window.__ModuleLoader__.load({
       '.dv-manage{border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));border-radius:14px;background:var(--dsw-alias-bg-layer-1,#fff);overflow:hidden}',
       '.dv-manageSum{display:flex;align-items:center;gap:10px;padding:13px 14px;color:var(--dsw-alias-label-primary,#1a1a1a);font-size:13px;line-height:20px;font-weight:500;cursor:pointer;list-style:none;user-select:none}',
       '.dv-manageSum::-webkit-details-marker{display:none}',
-      '.dv-manageSum::after{content:"▸";margin-left:auto;color:var(--dsw-alias-label-tertiary,rgba(0,0,0,.5));font-size:12px;transition:transform .18s ease}',
+      '.dv-manageSum::after{content:"";flex:none;margin-left:auto;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid var(--dsw-alias-label-tertiary,rgba(0,0,0,.55));transition:transform .18s ease}',
       '.dv-manage[open] .dv-manageSum{border-bottom:1px solid var(--dsw-alias-border-l3,rgba(127,127,127,.16))}',
       '.dv-manage[open] .dv-manageSum::after{transform:rotate(90deg)}',
       '.dv-manageCount{flex:none;min-width:22px;padding:1px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.14));color:var(--dsw-alias-label-tertiary,rgba(0,0,0,.6));font-size:11px;font-weight:400;text-align:center}',
       '.dv-manageBody{padding:12px 14px 14px}',
+      // 「调整」框复用 .dv-manage 的外观，但展开状态由我们自己控制（是个 button，不是
+      // <details>/<summary>）—— 这样「保存」能可靠地把它收起来，也不用赌 React 对
+      // details 的 toggle 事件支持。于是 [open] 那两条规则需要一份等价物。
+      '.dv-manageSumBtn{width:100%;border:0;background:transparent;font-family:inherit;text-align:left}',
+      '.dv-manageOpen .dv-manageSum{border-bottom:1px solid var(--dsw-alias-border-l3,rgba(127,127,127,.16))}',
+      '.dv-manageOpen .dv-manageSum::after{transform:rotate(90deg)}',
+      '.dv-glowActions{display:flex;justify-content:flex-end;margin-top:12px}',
+      '.dv-glowActions .dv-btn{height:28px;padding:0 18px}',
+      '.dv-glowSave{font-weight:600}',
       '.dv-addRow{display:flex;align-items:center;justify-content:center;gap:6px;height:38px;margin:0 0 10px;border:1px dashed var(--dsw-alias-border-l2,rgba(127,127,127,.45));border-radius:11px;color:var(--dsw-alias-label-secondary,rgba(0,0,0,.7));font-size:12px;cursor:pointer}',
       '.dv-addRow:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.1));color:var(--dsw-alias-label-primary,#1a1a1a)}',
       '.dv-soundList{max-height:236px;margin:0 -14px;padding:0 14px;overflow:auto}',
@@ -1538,6 +1676,31 @@ window.__ModuleLoader__.load({
     // ════════════════════════════════════════════════════════════════════════
 
     /**
+     * 分组卡片 —— 把同类的行并进一张卡，组头可点击折叠。
+     *
+     * 为什么是 `<button>` 而不是 `<details>`：折叠状态要由 React 独家掌握（将来想做"全部收起"
+     * 或按形态自动收起时，只需要动一处 state），而且**内部行永远渲染**、收起只由 CSS 隐藏
+     * （`.dv-groupClosed .dv-groupBody{display:none}`）—— 校验脚本遍历的是虚拟树、不看 CSS，
+     * 永远渲染才能保证"控件永远找得到"，不会因为恰好处于收起态而漏测。
+     *
+     * `open` 的默认值是 `true`（只有显式传 `false` 才收起）：调用方少写一个 prop 也不会
+     * 把内容藏起来。
+     * @param props `{ label, open, onToggle, children }`。
+     */
+    function Group(props) {
+      const open = props.open !== false
+      return h('section', { className: open ? 'dv-group' : 'dv-group dv-groupClosed' },
+        h('button', {
+          type: 'button',
+          className: 'dv-groupHead',
+          'aria-expanded': open,
+          onClick: props.onToggle,
+        }, h('span', null, props.label)),
+        h('div', { className: 'dv-groupBody' }, props.children),
+      )
+    }
+
+    /**
      * 一行开关 —— 右侧是**带"关/开"文字的滑块按钮**（用户点名要的形态）。
      *
      * 结构：真 `<input type=checkbox>`（视觉隐藏，键盘/读屏都认）+ 紧随其后的 `.dv-switch`，
@@ -1591,7 +1754,7 @@ window.__ModuleLoader__.load({
     /**
      * 音效 id → 显示名。
      *
-     * 自带的 15 个有中英文学名（`settings.sound.<id>`）；用户自己导入的没有词条，
+     * 自带的 48 个有中英文学名（`settings.sound.<id>`）；用户自己导入的没有词条，
      * 就直接显示 id（那就是他自己的文件名派生出来的，认得出来）。
      * @param id 音效 id。
      * @param t 槽位给的翻译函数。
@@ -1603,13 +1766,30 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 设置页组件。props = 槽位标准件（t）+ inject 面（`useSettings`/`useCatalog` 快照钩子、
-     * `update`、`preview`、`addSounds`、`removeSound`、`channelLost`）。
+     * 边框演示的固定时长（毫秒）—— 用户点名的 10 秒。
      *
-     * 布局口径（用户定稿，两轮精简后）：
-     *   · **一行解释文字都不写**：没有副标题、没有分组小标题、没有 desc、没有"0 为静音"这类提示。
+     * 这个数字**必须三处一致**：这里、`index.js` 路由里那个 `clampInt(…, durationMs)` 的兜底值、
+     * `win-overlay.cs` 的 `DefaultDemoMs`。`verify-glow-preview.mjs` 会逐处核对。
+     * 声明在**工厂作用域**（而不是 `apply(ctx)` 里）：设置页组件与 `apply` 是平级函数，
+     * 组件要用的东西只能在工厂作用域或 props 上（见组件里 `requestGlowDemo` 的说明）。
+     */
+    const GLOW_DEMO_MS = 10000
+
+    /**
+     * 设置页组件。props = 槽位标准件（t、useSettings、useCatalog）+ `inject` 面
+     * （`update`、`preview`、`glowPreview`、`addSounds`、`removeSound`、`channelLost`）。
+     *
+     * ⚠️ 组件**看不到** `apply(ctx)` 里的任何东西（两者是平级函数）。凡是组件要用的宿主能力，
+     *    都必须由 `apply` 里的 `face()` 经 props 传进来 —— 直接引用会 ReferenceError。
+     *
+     * 布局口径：
+     *   · **行内不写解释文字**：没有副标题、没有 desc、没有"0 为静音"这类提示。
+     *     唯一的例外是**分组标题**（「外观 / 声音」）—— 那是层级信息，不是解释文字。
      *   · 总开关单独一块放最前（优先级最高）；它关着时下面**全部变灰且不可点**。
-     *   · 音效相关收进**一个模块**：下拉试听 + 音量 + 可展开的「音效库」（添加与删除同处）。
+     *   · 其余按**两件事**分组：「外观」（形态 / 卡片 / 边框 / 停留）与「声音」（页内音效 /
+     *     提示音 / 音量 / 音效库）。组头可点击折叠、默认全展开（用户定稿："该叠起来就叠起来"）。
+     *     分组之后，同类的行并进同一张卡、行间只用一根 hairline 分隔 —— 不再是"一堵胶囊墙"。
+     *   · 「边框特效」是「边框光效」的**子项**（靠缩进 + 更轻的字重表达从属）。
      *   · 四类提醒 / 子代理**没有开关**——它们的语义是硬行为（见 host-config.js 的说明）。
      *   · **形态相关的行按需灰掉**，而不是藏起来：选「页内卡片」时，边框光效与它的三个滑条、
      *     以及顶部卡片的停留时间都会变灰。灰比藏好——用户能看见"有这个东西，只是当前形态用不上"，
@@ -1622,6 +1802,131 @@ window.__ModuleLoader__.load({
 
       const t = props.t
       const set = (field) => (value) => { props.update(field, value) }
+
+      // ── 分组展开状态 ─────────────────────────────────────────────────────
+      // 一个对象装下所有分组（而不是每组一个 useState）：将来要做"全部收起 / 按形态自动收起"
+      // 时只需一次 setState 就能原子地改完，也少占几个 hook 槽位。
+      // 默认**全展开** —— 折叠是给用户的可选项，不该默认把设置藏起来。
+      const [groupsOpen, setGroupsOpen] = React.useState({ look: true, sound: true })
+      /** 折叠/展开一个分组。函数式更新：连点两次时不会读到同一个旧快照。 */
+      const toggleGroup = (key) => {
+        setGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+      }
+
+      // ── 边框演示 ─────────────────────────────────────────────────────────
+      // 三个指标以前是"一改就存"，而效果**只在提醒真的发生时**才看得见 —— 等于闭着眼调。
+      // 现在它们收进一个可展开的「调整」框：改滑条只动**草稿**，点「应用」才写回配置，
+      // 并让桌面放一次**固定 10 秒**的演示，放完自己收掉。
+      //
+      // 为什么不做"拖动时实时变"：那要给覆盖层配一整套活参数 + 相位累积 + 逐帧清条带，
+      // 而用户看到的是"拖半天，不知道到底存没存、这段光是不是就是最终效果"。固定时长的
+      // 一次演示更确定 —— 点一下、看 10 秒、结束。底层那条 `update`（活参数）通道仍在
+      // `win-overlay.cs` 里留着，将来想回到实时预览只需改这里。
+      const [glowDraft, setGlowDraft] = React.useState(null)
+      const [glowDemoing, setGlowDemoing] = React.useState(false)
+      // 宿主还是旧版插件（没有 glow-preview 路由）时置位。这条提示专门治"代码改了、
+      // 但 DSH 还加载着旧插件" —— 否则用户只能看到"点了没反应"，无从下手。
+      const [glowHostStale, setGlowHostStale] = React.useState(false)
+      // 演示的收尾计时器。
+      // ⚠️ 必须是 **ref**，不能用普通变量：组件每次渲染都会重新执行一遍函数体，
+      //    闭包变量会在下一帧被重新初始化成 null ⇒ 句柄丢失 ⇒「演示中…」永远不恢复，
+      //    而且连着点两次「应用」时旧计时器也清不掉（新演示会在旧时刻被提前收掉）。
+      const glowTimerRef = React.useRef(null)
+      const glowOpen = glowDraft !== null
+      const glowValue = {
+        fade: glowOpen ? glowDraft.fade : settings.glowFade,
+        intensity: glowOpen ? glowDraft.intensity : settings.glowIntensity,
+        speed: glowOpen ? glowDraft.speed : settings.glowSpeed,
+      }
+
+      /** 展开调整框：只把滑条露出来，**不动桌面**（要点「应用」才演示）。 */
+      const openGlowTuning = () => {
+        setGlowDraft({
+          fade: settings.glowFade,
+          intensity: settings.glowIntensity,
+          speed: settings.glowSpeed,
+        })
+      }
+
+      /**
+       * 请宿主在桌面上放一次边框演示 / 把它收掉。
+       *
+       * ⚠️ **必须走 `props.glowPreview`**，不能直接调宿主桥：那座桥（`sendGlowPreview`）住在
+       *    `apply(ctx)` 的作用域里，而本组件与它是**平级函数**，根本看不见它。第一版就是直接
+       *    调的，结果是点「应用」抛 `ReferenceError`：配置存进去了、桌面什么都没放、按钮也不变
+       *    「演示中…」，用户能看到的只有"点了没反应"。离开设置页时那个卸载清理也会抛同样的错 ——
+       *    而这个错误发生在 React 的提交阶段，会把上面整片 UI 一起带走（用户看到"设置入口不见了"）。
+       *    与「试听」同一条路：宿主能力一律经 `inject` 面传进来（见 apply 里的 `face()`）。
+       * @param action `'start'` | `'stop'`。
+       * @param spec start 时给 `{ fade, intensity, speed, durationMs }`；stop 传 null。
+       * @returns 永不 reject。true = 宿主接下了这次请求；false = 通道不可用或宿主是旧版。
+       */
+      const requestGlowDemo = (action, spec) => {
+        const bridge = props.glowPreview
+        if (typeof bridge !== 'function') return Promise.resolve(false)
+        try {
+          return Promise.resolve(bridge(action, spec)).then((ok) => ok === true, () => false)
+        } catch {
+          return Promise.resolve(false)
+        }
+      }
+
+      /** 停掉正在跑的演示（计时器 + 桌面那圈边框）。 */
+      const stopGlowDemo = () => {
+        if (glowTimerRef.current !== null) {
+          window.clearTimeout(glowTimerRef.current)
+          glowTimerRef.current = null
+        }
+        setGlowDemoing(false)
+        void requestGlowDemo('stop', null)
+      }
+
+      /** 收起调整框：丢掉草稿并把演示收掉 —— 配置一个字都不动（没点「应用」= 没改过）。 */
+      const closeGlowTuning = () => {
+        setGlowDraft(null)
+        stopGlowDemo()
+      }
+
+      /** 改一项草稿：只存在页面里，**不落盘、也不碰桌面**。 */
+      const editGlowDraft = (field, value) => {
+        if (glowDraft === null) return
+        setGlowDraft({ ...glowDraft, [field]: value })
+      }
+
+      /** 应用：三个值一次写回配置，然后放一次固定 10 秒的桌面演示。 */
+      const applyGlowTuning = () => {
+        if (glowDraft === null) return
+        props.update('glowFade', glowDraft.fade)
+        props.update('glowIntensity', glowDraft.intensity)
+        props.update('glowSpeed', glowDraft.speed)
+        // 上一段演示还没放完就又点了一次：先作废旧计时器再重新计。
+        // 漏了这步的话，新演示会在**旧**的截止时刻被一起收掉 —— 用户看到"只放了 3 秒"。
+        if (glowTimerRef.current !== null) window.clearTimeout(glowTimerRef.current)
+        setGlowDemoing(true)
+        glowTimerRef.current = window.setTimeout(() => {
+          glowTimerRef.current = null
+          setGlowDemoing(false)
+        }, GLOW_DEMO_MS)
+        void requestGlowDemo('start', {
+          fade: glowDraft.fade,
+          intensity: glowDraft.intensity,
+          speed: glowDraft.speed,
+          durationMs: GLOW_DEMO_MS,
+        }).then((ok) => {
+          // 成功一次就把"宿主还是旧版"的提示撤掉 —— 用户重载插件后不必再刷新页面。
+          setGlowHostStale(!ok)
+        })
+      }
+
+      // 组件卸载（切到别的设置页 / 页面卸载）时把演示收掉 —— 否则那圈边框会一直亮着，
+      // 直到 C# 侧那个时长到期。计时器也必须清：回调里会 setState。
+      React.useEffect(() => () => {
+        if (glowTimerRef.current !== null) {
+          window.clearTimeout(glowTimerRef.current)
+          glowTimerRef.current = null
+        }
+        void requestGlowDemo('stop', null)
+      }, [])
 
       // 下拉选项 = 宿主扫盘得到的清单（自带 + 用户导入），`none` 永远在最后。
       // 宿主通道不通时回落到静态清单，至少能选自带的那些。
@@ -1636,8 +1941,6 @@ window.__ModuleLoader__.load({
       const masterOff = settings.enabled !== true
       // 边框光效与"停留时间"只属于顶部卡片形态；选页内卡片时它们灰掉。
       const topOff = masterOff || settings.noticeStyle !== 'topCard'
-      // 光效的三个滑条要等「边框光效」自己打开才有意义。
-      const glowOff = topOff || settings.edgeGlow !== true
       const soundOff = masterOff || settings.soundPreset === 'none' || !(settings.volume > 0)
 
       return h('section', { className: 'dv-section' },
@@ -1652,118 +1955,190 @@ window.__ModuleLoader__.load({
             onChange: set('enabled'),
           }),
         ),
-        // ── 通知形式：两种形态并存、可切换 ────────────────────────────────
-        h('div', { className: masterOff ? 'dv-row dv-off' : 'dv-row' },
-          h('span', { className: 'dv-rowText' },
-            h('span', { className: 'dv-rowTitle' }, t('settings.noticeStyle')),
-          ),
-          h('select', {
-            className: 'dv-select',
-            value: settings.noticeStyle,
-            disabled: masterOff,
-            'aria-label': t('settings.noticeStyle'),
-            onChange: (nativeEvent) => { set('noticeStyle')(nativeEvent.target.value) },
-          },
-            h('option', { key: 'card', value: 'card' }, t('settings.noticeStyle.card')),
-            h('option', { key: 'topCard', value: 'topCard' }, t('settings.noticeStyle.topCard')),
-          ),
-        ),
-
-        // ── 页内卡片：你在 DSH 页面上时到底要不要被打扰（两种形态共用这道门禁）──
-        h(ToggleRow, {
-          label: t('settings.pageCard'),
-          checked: settings.pageCard === true,
-          disabled: masterOff,
-          onChange: set('pageCard'),
-        }),
-
-        // ── 边框光效：只跟顶部卡片配套 ────────────────────────────────────
-        // 右下角卡片配满屏彩虹很奇怪，所以选「页内卡片」时这一行直接灰掉。
-        h(ToggleRow, {
-          label: t('settings.edgeGlow'),
-          checked: settings.edgeGlow === true,
-          disabled: topOff,
-          onChange: set('edgeGlow'),
-        }),
-        // 三个可调量的区间直接沿用原型滑条的实测范围（那三个滑条就是用来把手感调对的）。
-        // ⚠️ 边框**时长**刻意没有滑条：它是死逻辑，等于通知音效的时长（想改就换音效）。
-        h(RangeRow, { label: t('settings.glowFade'), value: settings.glowFade, min: 16, max: 110, unit: 'px', disabled: glowOff, onChange: set('glowFade') }),
-        h(RangeRow, { label: t('settings.glowIntensity'), value: settings.glowIntensity, min: 30, max: 100, unit: '%', disabled: glowOff, onChange: set('glowIntensity') }),
-        h(RangeRow, { label: t('settings.glowSpeed'), value: settings.glowSpeed, min: 30, max: 220, unit: '%', disabled: glowOff, onChange: set('glowSpeed') }),
-
-        // ── 顶部卡片的停留时间（与页内卡片的 durationSec 各自可调）──────────
-        h(RangeRow, { label: t('settings.cardDurationSec'), value: settings.cardDurationSec, min: 3, max: 30, unit: 's', disabled: topOff, onChange: set('cardDurationSec') }),
-
-        // ── 页内音效：在 DSH 页面上**也**响一次 ───────────────────────────
-        // 默认关 —— 与"我在工作状态，能看到任务，提醒多余"那条定稿一致；愿意在 DSH 里
-        // 也听见声音的人自己打开。打开后边框光效会跟着这一次音效的时长走。
-        h(ToggleRow, {
-          label: t('settings.pageSound'),
-          checked: settings.pageSound === true,
-          disabled: masterOff,
-          onChange: set('pageSound'),
-        }),
-
-        // ── 音效（一个模块装下：选 / 试听 / 音量 / 音效库）──────────────────
-        h('div', { className: masterOff ? 'dv-row dv-off' : 'dv-row' },
-          h('span', { className: 'dv-rowText' },
-            h('span', { className: 'dv-rowTitle' }, t('settings.sound')),
-          ),
-          h('select', {
-            className: 'dv-select',
-            value: settings.soundPreset,
-            disabled: masterOff,
-            'aria-label': t('settings.sound'),
-            onChange: (nativeEvent) => {
-              set('soundPreset')(nativeEvent.target.value)
-              if (nativeEvent.target.value !== 'none') props.preview(nativeEvent.target.value)
-            },
-          }, soundOptions.map((option) => h('option', { key: option, value: option }, soundLabel(option, t)))),
-          h('button', {
-            type: 'button',
-            className: 'dv-btn',
-            disabled: soundOff,
-            onClick: () => { props.preview(settings.soundPreset) },
-          }, t('settings.soundPreview')),
-        ),
-        h(RangeRow, { label: t('settings.volume'), value: settings.volume, min: 0, max: 100, unit: '%', disabled: masterOff, onChange: set('volume') }),
-
-      // 「音效库」：**圆角方框 + 点击展开**（用户点名）。收起时一行；展开后
-      // 先是一条虚线"添加"行，再是清单（名称单行截断、右侧试听/删除，自身限高可滚）。
-      // 标签包住隐藏的 file input：点标签就等于点按钮，不需要 ref。
-      h('details', { className: masterOff ? 'dv-manage dv-off' : 'dv-manage' },
-          h('summary', { className: 'dv-manageSum' },
-            h('span', null, t('settings.soundLibrary')),
-            h('span', { className: 'dv-manageCount' }, String(catalog.length)),
-          ),
-          h('div', { className: 'dv-manageBody' },
-            h('label', { className: 'dv-addRow' },
-              t('settings.soundAddPick'),
-              h('input', {
-                type: 'file',
-                accept: 'audio/*,.mp3,.wav,.m4a,.wma,.aac',
-                multiple: true,
-                style: { display: 'none' },
-                disabled: masterOff,
-                onChange: (nativeEvent) => {
-                  const files = nativeEvent.target.files
-                  void props.addSounds(files)
-                  // 清掉选择，方便连续导入同一个文件。
-                  try { nativeEvent.target.value = '' } catch { /* 无伤 */ }
-                },
-              }),
+        // ── 分组一：外观（提醒长什么样 · 形态 / 卡片 / 边框 / 停留）────────────
+        // 这几条本来就是同一件事的不同侧面：选形态、决定要不要页内卡片、要不要那圈彩虹、
+        // 停多久。收进同一张卡之后，「边框特效」还能顺理成章地挂在它所修饰的「边框光效」下面。
+        h(Group, {
+          label: t('settings.groupLook'),
+          open: groupsOpen.look,
+          onToggle: () => { toggleGroup('look') },
+        },
+          // 通知形式：两种形态并存、可切换 ─────────────────────────────────
+          h('div', { className: masterOff ? 'dv-row dv-off' : 'dv-row' },
+            h('span', { className: 'dv-rowText' },
+              h('span', { className: 'dv-rowTitle' }, t('settings.noticeStyle')),
             ),
-            h('div', { className: 'dv-soundList' }, catalog.map((item) => h('div', { key: item.id, className: 'dv-soundItem' },
-              h('span', { className: 'dv-soundName', title: item.id }, soundLabel(item.id, t)),
-              h('span', { className: 'dv-soundTag' }, item.builtin ? t('settings.soundBuiltin') : t('settings.soundUser')),
-              h('button', { type: 'button', className: 'dv-btn', disabled: masterOff, onClick: () => { props.preview(item.id) } }, t('settings.soundPreview')),
-              h('button', {
-                type: 'button',
-                className: 'dv-btn dv-danger',
-                disabled: masterOff,
-                onClick: () => { void props.removeSound(item.id) },
-              }, t('settings.soundDelete')),
-            ))),
+            h('select', {
+              className: 'dv-select',
+              value: settings.noticeStyle,
+              disabled: masterOff,
+              'aria-label': t('settings.noticeStyle'),
+              onChange: (nativeEvent) => { set('noticeStyle')(nativeEvent.target.value) },
+            },
+              h('option', { key: 'card', value: 'card' }, t('settings.noticeStyle.card')),
+              h('option', { key: 'topCard', value: 'topCard' }, t('settings.noticeStyle.topCard')),
+            ),
+          ),
+
+          // 页内卡片：你在 DSH 页面上时到底要不要被打扰（两种形态共用这道门禁）──
+          h(ToggleRow, {
+            label: t('settings.pageCard'),
+            checked: settings.pageCard === true,
+            disabled: masterOff,
+            onChange: set('pageCard'),
+          }),
+
+          // 边框光效：只跟顶部卡片配套 ────────────────────────────────────
+          // 右下角卡片配满屏彩虹很奇怪，所以选「页内卡片」时这一行直接灰掉。
+          h(ToggleRow, {
+            label: t('settings.edgeGlow'),
+            checked: settings.edgeGlow === true,
+            disabled: topOff,
+            onChange: set('edgeGlow'),
+          }),
+
+          // 边框特效：**「边框光效」的子项** —— `dv-manageSub` 只做缩进 + 压轻字重，表达从属。
+          // 三个可调量**收进一个可展开的「调整」框**（用户点名）。
+          // 收起时只占一行；展开后改滑条只动草稿，点「应用」才写配置并放一次 10 秒演示。
+          // 区间沿用原型滑条的实测范围（那三个滑条就是用来把手感调对的）。
+          // ⚠️ 边框**时长**刻意没有滑条：它是死逻辑，等于通知音效的时长（想改就换音效）。
+          // ⚠️ 这个框**既不看 `glowOff`、也不随总开关灰掉**：演示有意不看开关（跟「试听」同一条理由）——
+          //    用户点「应用」就是想看那一圈边框长什么样，被"开关没开 / 总开关关着"挡住只会以为坏了。
+          //    灰化还会让人以为不能点，所以这里连 `dv-off` 都不加。
+          h('div', { className: 'dv-manage dv-manageSub' + (glowOpen ? ' dv-manageOpen' : '') },
+            h('button', {
+              type: 'button',
+              className: 'dv-manageSum dv-manageSumBtn',
+              'aria-expanded': glowOpen,
+              onClick: () => { if (glowOpen) closeGlowTuning(); else openGlowTuning() },
+            },
+              h('span', null, t('settings.glowTuning')),
+              h('span', { className: 'dv-manageCount' },
+                glowDemoing ? t('settings.glowDemoing')
+                  : (glowOpen ? t('settings.glowCollapse') : t('settings.glowAdjust'))),
+            ),
+            glowOpen ? h('div', { className: 'dv-manageBody' },
+              h(RangeRow, {
+                label: t('settings.glowFade'),
+                value: glowValue.fade,
+                min: 16,
+                max: 110,
+                unit: 'px',
+                onChange: (value) => { editGlowDraft('fade', value) },
+              }),
+              h(RangeRow, {
+                label: t('settings.glowIntensity'),
+                value: glowValue.intensity,
+                min: 30,
+                max: 100,
+                unit: '%',
+                onChange: (value) => { editGlowDraft('intensity', value) },
+              }),
+              h(RangeRow, {
+                label: t('settings.glowSpeed'),
+                value: glowValue.speed,
+                min: 30,
+                max: 220,
+                unit: '%',
+                onChange: (value) => { editGlowDraft('speed', value) },
+              }),
+              h('div', { className: 'dv-glowActions' },
+                h('button', {
+                  type: 'button',
+                  className: 'dv-btn dv-glowSave',
+                  disabled: glowDemoing,
+                  onClick: applyGlowTuning,
+                }, glowDemoing ? t('settings.glowDemoing') : t('settings.glowApply')),
+              ),
+              // 宿主没这个路由 ⇒ 它加载的还是旧版插件。**必须说出来**：
+              // 否则用户看到的是"点了没反应"，只会以为功能坏了，而不是"该重载插件了"。
+              glowHostStale ? h('p', { className: 'dv-warn' }, t('settings.glowStale')) : null,
+            ) : null,
+          ),
+
+          // 顶部卡片的停留时间（与页内卡片的 durationSec 各自可调）──────────
+          h(RangeRow, { label: t('settings.cardDurationSec'), value: settings.cardDurationSec, min: 3, max: 30, unit: 's', disabled: topOff, onChange: set('cardDurationSec') }),
+
+        ),
+
+        // ── 分组二：声音（响不响 / 响哪个 / 多响）──────────────────────────
+        h(Group, {
+          label: t('settings.groupSound'),
+          open: groupsOpen.sound,
+          onToggle: () => { toggleGroup('sound') },
+        },
+          // 页内音效：在 DSH 页面上**也**响一次 ───────────────────────────
+          // 默认关 —— 与"我在工作状态，能看到任务，提醒多余"那条定稿一致；愿意在 DSH 里
+          // 也听见声音的人自己打开。打开后边框光效会跟着这一次音效的时长走。
+          h(ToggleRow, {
+            label: t('settings.pageSound'),
+            checked: settings.pageSound === true,
+            disabled: masterOff,
+            onChange: set('pageSound'),
+          }),
+
+          // 提示音：选哪个 + 就地试听（一个模块装下选 / 试听）────────────────
+          h('div', { className: masterOff ? 'dv-row dv-off' : 'dv-row' },
+            h('span', { className: 'dv-rowText' },
+              h('span', { className: 'dv-rowTitle' }, t('settings.sound')),
+            ),
+            h('select', {
+              className: 'dv-select',
+              value: settings.soundPreset,
+              disabled: masterOff,
+              'aria-label': t('settings.sound'),
+              onChange: (nativeEvent) => {
+                set('soundPreset')(nativeEvent.target.value)
+                if (nativeEvent.target.value !== 'none') props.preview(nativeEvent.target.value)
+              },
+            }, soundOptions.map((option) => h('option', { key: option, value: option }, soundLabel(option, t)))),
+            h('button', {
+              type: 'button',
+              className: 'dv-btn',
+              disabled: soundOff,
+              onClick: () => { props.preview(settings.soundPreset) },
+            }, t('settings.soundPreview')),
+          ),
+
+          h(RangeRow, { label: t('settings.volume'), value: settings.volume, min: 0, max: 100, unit: '%', disabled: masterOff, onChange: set('volume') }),
+
+          // 「音效库」：**圆角方框 + 点击展开**（用户点名）。收起时一行；展开后
+          // 先是一条虚线"添加"行，再是清单（名称单行截断、右侧试听/删除，自身限高可滚）。
+          // 标签包住隐藏的 file input：点标签就等于点按钮，不需要 ref。
+          h('details', { className: masterOff ? 'dv-manage dv-off' : 'dv-manage' },
+            h('summary', { className: 'dv-manageSum' },
+              h('span', null, t('settings.soundLibrary')),
+              h('span', { className: 'dv-manageCount' }, String(catalog.length)),
+            ),
+            h('div', { className: 'dv-manageBody' },
+              h('label', { className: 'dv-addRow' },
+                t('settings.soundAddPick'),
+                h('input', {
+                  type: 'file',
+                  accept: 'audio/*,.mp3,.wav,.m4a,.wma,.aac',
+                  multiple: true,
+                  style: { display: 'none' },
+                  disabled: masterOff,
+                  onChange: (nativeEvent) => {
+                    const files = nativeEvent.target.files
+                    void props.addSounds(files)
+                    // 清掉选择，方便连续导入同一个文件。
+                    try { nativeEvent.target.value = '' } catch { /* 无伤 */ }
+                  },
+                }),
+              ),
+              h('div', { className: 'dv-soundList' }, catalog.map((item) => h('div', { key: item.id, className: 'dv-soundItem' },
+                h('span', { className: 'dv-soundName', title: item.id }, soundLabel(item.id, t)),
+                h('span', { className: 'dv-soundTag' }, item.builtin ? t('settings.soundBuiltin') : t('settings.soundUser')),
+                h('button', { type: 'button', className: 'dv-btn', disabled: masterOff, onClick: () => { props.preview(item.id) } }, t('settings.soundPreview')),
+                h('button', {
+                  type: 'button',
+                  className: 'dv-btn dv-danger',
+                  disabled: masterOff,
+                  onClick: () => { void props.removeSound(item.id) },
+                }, t('settings.soundDelete')),
+              ))),
+            ),
           ),
         ),
       )
@@ -1858,6 +2233,8 @@ window.__ModuleLoader__.load({
       const CLICK_ROUTE = '/plugins/dsh-donevoice/health.json?probe=click'
       /** 试听路由：声音文件在插件目录里，**只有宿主进程能播**，页面只能请它代播。 */
       const PREVIEW_ROUTE = '/plugins/dsh-donevoice/preview'
+      /** 边框演示：请宿主在桌面上把那一圈边框亮一段**固定时长**（见 sendGlowPreview）。 */
+      const GLOW_PREVIEW_ROUTE = '/plugins/dsh-donevoice/glow-preview'
       /** 音效清单 / 导入 / 删除（宿主代做：文件在磁盘上，页面碰不到）。 */
       const SOUNDS_ROUTE = '/plugins/dsh-donevoice/sounds.json'
       const settingsStore = createStore({ value: DEFAULT_CONFIG })
@@ -1970,6 +2347,50 @@ window.__ModuleLoader__.load({
         chime.unlock()
         chime.play('completion')
         record('试听：宿主通道不可用，改用页内蜂鸣')
+      }
+
+      /**
+       * 请宿主在桌面上放一次边框演示（设置页点「应用」用），或把它收掉。
+       *
+       * 为什么不复用 `previewSound`：那条是"放一声就完"，这条要的是一圈**持续固定时长**
+       * 的边框（默认 10 秒，到点由覆盖层自己收）。
+       * @param action `'start'` | `'update'` | `'stop'`。
+       * @param spec `{ fade, intensity, speed, durationMs }`（逻辑像素 / 百分比 / 百分比 / 毫秒）；stop 时不需要。
+       * @returns 画/改成功（stop 一律算成功）返回 true；永不 reject。
+       */
+      async function sendGlowPreview(action, spec) {
+        const payload = { action }
+        if (spec !== null && spec !== undefined) {
+          payload.fade = spec.fade
+          payload.intensity = spec.intensity
+          payload.speed = spec.speed
+          payload.durationMs = spec.durationMs
+        }
+        try {
+          const response = await window.fetch(GLOW_PREVIEW_ROUTE, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+          if (response === null || typeof response !== 'object' || response.ok !== true) {
+            // 404 是**最该说出口**的一种失败：宿主加载的还是没有这条路由的旧版插件。
+            // 不说的话，用户只能看到"点了没反应"，然后来问"为什么没有效果"。
+            if (action === 'start') {
+              record('边框演示：宿主没有这个路由（' + GLOW_PREVIEW_ROUTE + '，HTTP '
+                + String(response?.status ?? '?') + '）—— 插件可能还是旧版，需要重载或重启 DSH')
+            }
+            return action === 'stop'
+          }
+          const result = await response.json()
+          if (result !== null && typeof result === 'object' && result.shown === true) return true
+          // 只有 start 失败才值得出声：update/stop 落空多半只是"演示已经自己到期了"，
+          // 每次都记一条会把诊断刷成噪音。
+          if (action === 'start') record('边框演示：覆盖层没能画出来（' + String(result?.degraded ?? '') + '）')
+          return action === 'stop'
+        } catch (error) {
+          if (action === 'start') record('边框演示：宿主通道不可用 —— ' + String(error))
+          return action === 'stop'
+        }
       }
 
       /**
@@ -3047,6 +3468,10 @@ window.__ModuleLoader__.load({
         update: (field, value) => { void persistSettings(field, value) },
         // 试听：声音文件在插件目录里、只有宿主播得了 ⇒ 请宿主播（见 previewSound）。
         preview: (preset) => { void previewSound(preset, settings.volume) },
+        // 桌面边框演示：覆盖层在宿主进程里，页面只能请它放（见 sendGlowPreview）。
+        // ⚠️ 必须经 `face()` 传进组件 —— 组件与 `apply(ctx)` 是两个平级作用域，
+        //    组件里直接引用 `sendGlowPreview` 会 ReferenceError（第一版就是这么栽的）。
+        glowPreview: (action, spec) => sendGlowPreview(action, spec),
         // 音效管理：导入 / 删除都由宿主代做（文件在磁盘上，页面碰不到）。
         addSounds: (fileList) => importSounds(fileList),
         removeSound: (id) => removeSound(id),

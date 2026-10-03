@@ -19,11 +19,35 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+
+/**
+ * 从 `win-native.js` 里抠出提示音清单（`SOUND_FILES` 的 id → 文件名）。
+ *
+ * 为什么用正则读文本而不是 `import('./win-native.js')`：这个脚本的职责是"包结构对不对"，
+ * 应该在**没有 DSH、没有装任何依赖**的干净环境里也能跑；而 `win-native.js` 是插件模块。
+ * 抠不到就返回空对象，由调用方**判失败**——空清单会让下面那条逐项核对变成空转，
+ * 那种"永远绿灯"的校验比没有校验更危险。
+ * @returns id → 文件名的映射。
+ */
+function parseSoundFiles() {
+  const src = readFileSync(join(ROOT, 'win-native.js'), 'utf8')
+  const at = src.indexOf('export const SOUND_FILES = Object.freeze({')
+  if (at < 0) return {}
+  const end = src.indexOf('\n})', at)
+  if (end < 0) return {}
+  const out = {}
+  for (const m of src.slice(at, end).matchAll(/([A-Za-z0-9_]+):\s*'([^']+)'/g)) out[m[1]] = m[2]
+  return out
+}
+
+/** 提示音允许的扩展名（与 `win-native.js` 的 `SOUND_EXTS` 同一口径）。 */
+const PACKED_SOUND_EXTS = ['.mp3', '.wav', '.m4a', '.wma', '.aac']
 
 const failures = []
 const notes = []
@@ -324,9 +348,38 @@ if (packed) {
     else fail(`产物缺 ${rel}`, 'package.json 的 files 里补上它，否则用户装到的是残包')
   }
 
-  const packagedSounds = packed.filter((p) => p.startsWith('sounds/') && p.endsWith('.mp3'))
-  if (packagedSounds.length > 0) ok('产物含提示音', `${packagedSounds.length} 个 mp3`)
-  else fail('产物含提示音', 'sounds/*.mp3 没进包，用户只能听到静音')
+  // 提示音：**逐项核对清单里点名的文件**，而不是只数个数。
+  //
+  // 只数个数会漏掉最阴的一种残包：`files` 白名单里写的是 `sounds/*.mp3`，而后来收录的
+  // 音效是 `.wav` —— 数量检查照样通过（mp3 那批还在），用户装完却是
+  // 「设置页下拉里有这个音效、点了没声音」。所以两条判据都要：
+  //   ① 产物里至少有提示音（防整个 sounds/ 掉出包）；
+  //   ② `SOUND_FILES` 里点名的文件**逐个**都在产物里（防只掉了一部分 / 只掉了新增的那批）。
+  const packagedSounds = packed.filter(
+    (p) => p.startsWith('sounds/') && PACKED_SOUND_EXTS.includes(extname(p).toLowerCase()))
+  if (packagedSounds.length > 0) {
+    const byExt = PACKED_SOUND_EXTS
+      .map((e) => [e, packagedSounds.filter((p) => p.toLowerCase().endsWith(e)).length])
+      .filter(([, n]) => n > 0)
+      .map(([e, n]) => `${n} 个 ${e.slice(1)}`)
+      .join(' + ')
+    ok('产物含提示音', byExt)
+  } else {
+    fail('产物含提示音', 'sounds/ 下的音频没进包，用户只能听到静音')
+  }
+
+  const soundFiles = parseSoundFiles()
+  const soundIds = Object.keys(soundFiles)
+  if (soundIds.length === 0) {
+    fail('提示音清单', '没能从 win-native.js 里读出 SOUND_FILES —— 这条核对会变成空转，先修它')
+  } else {
+    const absent = soundIds.filter((id) => packed.includes(`sounds/${soundFiles[id]}`) !== true)
+    if (absent.length === 0) ok('清单里的提示音全部在产物里', `${soundIds.length} 个，逐个核对`)
+    else {
+      fail('产物缺提示音', `${absent.map((id) => `${id}(${soundFiles[id]})`).join(', ')}`
+        + ' —— package.json 的 files 里补上对应扩展名（例如 "sounds/*.wav"）')
+    }
+  }
 
   const packagedLocale = packed.filter((p) => p.startsWith('locale/'))
   if (packagedLocale.length > 0) ok('产物含语言包', packagedLocale.join(', '))
@@ -391,28 +444,41 @@ if (packed) {
 // ------------------------------------------------- 本地 ZIP 安装路径（隔离 profile）
 
 section('本地 ZIP 安装脚本（隔离 profile，不修改真实 DSH）')
-// 测试目录在 .workbuddy-ai 下：installer 复制源码时跳过它，避免把测试目录复制进自身。
-const testRoot = join(ROOT, '.workbuddy-ai')
+// 隔离测试目录放**系统临时目录**，不落在工作区里。理由见下。
+//
+// 历史教训：它原来放在 `.workbuddy-ai/` 下，好处是 installer 复制源码时会跳过它。
+// 但它是**机器产物**，一份完整插件副本 ≈4 MB：自检正常跑完会自己删掉，可一旦进程被
+// 中断（Ctrl-C、超时被杀、CI 取消、被沙箱拦下），下面的 `finally` 就不会执行，
+// 4 MB 当场落地。更麻烦的是它被 `.gitignore` 挡着，`git status` 里完全看不见——
+// 实测攒过三个（≈12 MB），占了整个工作区一大半才被发现。
+//
+// 改放 `os.tmpdir()` 之后三件事一起成立：① 工作区永远干净；② 系统自己会回收临时目录；
+// ③ 它本来就在工作区之外，installer 自然不会把它复制进插件副本（原注释担心的那点自动成立）。
+const testRoot = tmpdir()
 mkdirSync(testRoot, { recursive: true })
 
-// 上一次自检若被中断（Ctrl-C、超时被杀、编辑器里点了停止），下面的隔离目录会留在
-// .workbuddy-ai 下——里面是一份完整的插件源码副本，约 1.9 MB。攒几次就是几十兆，
-// 而且它被 .gitignore 挡着，`git status` 里完全看不见，很容易一直没人发现。
-// 所以每次开跑前先扫一遍，删掉**陈旧的**隔离目录。
+// 每次开跑前扫一遍，删掉**陈旧的**隔离目录：残留只要出现，就说明有进程没跑完 finally，
+// 下次自检顺手带走即可。除了当前的临时目录，也回扫历史位置 `.workbuddy-ai/`，
+// 让早期版本留下的残留自己消失，不用人工清。
 //
 // 阈值 `10` 分钟怎么来的：自检本体只需要几秒，10 分钟是 **100 倍**余量，
-// 足够让"并行跑的另一次自检"不被打断；而原值 `60` 分钟太长——实测稳态会攒到
-// 6~7 个（≈14 MB）才轮到被清。顺带说明：残留**不只是**自检中断造成的，
-// 外部冒烟脚本（拿 `.workbuddy-ai/check-install-` 当临时 DSH_HOME 的那种）也会漏，
-// 而它们不会自己收尾 ⇒ 这里扫得勤一点，等于给整个工作区兜底。
+// 足够让并行跑的另一轮自检不被打断。
 const STALE_TEST_HOME_MS = 10 * 60 * 1000
-for (const entry of readdirSync(testRoot, { withFileTypes: true })) {
-  if (!entry.isDirectory() || !entry.name.startsWith('check-install-')) continue
-  const stale = join(testRoot, entry.name)
+for (const dir of [testRoot, join(ROOT, '.workbuddy-ai')]) {
+  let entries = []
   try {
-    if (Date.now() - statSync(stale).mtimeMs > STALE_TEST_HOME_MS) rmSync(stale, { recursive: true, force: true })
+    entries = readdirSync(dir, { withFileTypes: true })
   } catch {
-    // 清不掉就算了：这是清理副产品，不该因为它挡住真正的自检结论。
+    continue // 目录不存在（例如历史位置已被清空）就跳过，这不是错误。
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('check-install-')) continue
+    const stale = join(dir, entry.name)
+    try {
+      if (Date.now() - statSync(stale).mtimeMs > STALE_TEST_HOME_MS) rmSync(stale, { recursive: true, force: true })
+    } catch {
+      // 清不掉就算了：这是清理副产品，不该因为它挡住真正的自检结论。
+    }
   }
 }
 

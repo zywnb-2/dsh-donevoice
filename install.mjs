@@ -186,6 +186,41 @@ function writeJson(path, value) {
  * @param from 源目录。
  * @param to 目标目录（须已存在）。
  */
+/** 备份保留份数：只留最近几次，避免每次安装/卸载都堆一份、只增不减。 */
+const BACKUP_KEEP = 5
+
+/**
+ * 备份 `package.json`，并清理更早的历史备份。
+ *
+ * 为什么要有上限：安装与卸载每次写盘前都会备份一份，原先只增不减——实测攒到 30 多份，
+ * 和 `package.json` 挤在同一层，`ls` 一眼看去全是备份。保留最近几份足够回滚，
+ * 更早的没有价值（真要看历史还有 git）。
+ * @param {string} packageJsonPath profile 目录下的 package.json。
+ * @returns {string} 本次备份的路径。
+ */
+function backupPackageJson(packageJsonPath) {
+  const backup = packageJsonPath + '.donevoice-backup-' + new Date().toISOString().replace(/[:.]/g, '-')
+  copyFileSync(packageJsonPath, backup)
+  // 文件名里带 ISO 时间戳（冒号与点已换成连字符），所以**按名字排序就是按时间排序**。
+  const prefix = basename(packageJsonPath) + '.donevoice-backup-'
+  const dir = dirname(packageJsonPath)
+  let siblings = []
+  try {
+    siblings = readdirSync(dir)
+  } catch {
+    return backup // 读不了目录就只完成备份本身，别让轮转失败影响安装。
+  }
+  const expired = siblings.filter((name) => name.startsWith(prefix)).sort().slice(0, -BACKUP_KEEP)
+  for (const name of expired) {
+    try {
+      rmSync(join(dir, name), { force: true })
+    } catch {
+      // 删不掉就算了：这是清理副产品，不该因为它挡住安装本身。
+    }
+  }
+  return backup
+}
+
 function copyPluginTree(from, to) {
   for (const name of readdirSync(from)) {
     if (name === '.git' || name === '.workbuddy-ai' || name === '.workbuddy' || name === 'node_modules') continue
@@ -410,7 +445,7 @@ function install(options) {
   if (options.apply !== true) {
     console.log('')
     console.log('以上为预演。确认无误后执行：node install.mjs --apply')
-    console.log('（写入前会自动备份 package.json 为 package.json.donevoice-backup-<时间戳>）')
+    console.log('（写入前会自动备份 package.json 为 package.json.donevoice-backup-<时间戳>，只保留最近 ' + BACKUP_KEEP + ' 份）')
     return
   }
 
@@ -429,8 +464,7 @@ function install(options) {
     }
   }
 
-  const backup = packageJsonPath + '.donevoice-backup-' + new Date().toISOString().replace(/[:.]/g, '-')
-  copyFileSync(packageJsonPath, backup)
+  const backup = backupPackageJson(packageJsonPath)
   console.log('已备份 package.json → ' + backup)
 
   const next = readJson(packageJsonPath)
@@ -536,8 +570,7 @@ function uninstall(options) {
     return
   }
 
-  const backup = packageJsonPath + '.donevoice-backup-' + new Date().toISOString().replace(/[:.]/g, '-')
-  copyFileSync(packageJsonPath, backup)
+  const backup = backupPackageJson(packageJsonPath)
   const next = readJson(packageJsonPath)
   if (hasDependency) delete next.dependencies[PACKAGE_NAME]
   if (hasBundle) next.dsh.profile.bundles = bundles.filter((entry) => entry !== PACKAGE_NAME)

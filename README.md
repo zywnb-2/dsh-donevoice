@@ -34,7 +34,7 @@
 **1. 安装** —— DSH → **设置 → 插件 → 添加插件**，粘这一行：
 
 ```
-github:zywnb-2/dsh-donevoice#v1.2.0
+github:zywnb-2/dsh-donevoice#v1.3.0
 ```
 
 > **`#` 后面的版本号别删**，它把安装锁到对应的发布 tag；不写就跟随随时会变的 `main`。
@@ -53,7 +53,7 @@ github:zywnb-2/dsh-donevoice#v1.2.0
 
 | DoneVoice | 对应 DSH |
 |---|---|
-| **1.2.0** | 0.2.0-rc.2 |
+| **1.3.0** | 0.2.0-rc.2 |
 
 升级：插件页卸载旧版 → 装新版（只改 `#` 后面那串）→ 重启 DSH。
 

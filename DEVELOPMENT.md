@@ -12,7 +12,7 @@
 - [还原 Codex / WorkBuddy 到了什么程度](#还原-codex--workbuddy-到了什么程度)
 - [视觉规范（照抄 DSH 原生通知面）](#视觉规范照抄-dsh-原生通知面)
 - [提示音规范](#提示音规范)
-- [三个必须知道的坑](#三个必须知道的坑)
+- [八个必须知道的坑](#八个必须知道的坑)
 - [开发与验收](#开发与验收)
 - [目录结构](#目录结构)
 - [发版](#发版)
@@ -92,8 +92,11 @@
 
 ## 提示音规范
 
-**插件自带**的真实音效（`sounds/*.mp3`）+ `none` 静音。
+**插件自带**的真实音效（`sounds/*.mp3` 15 个 + `sounds/*.wav` 33 个，共 **48** 个）+ `none` 静音。
 它们**跟着插件一起走**：移动目录、打包给别人、换台电脑，音效都在——运行时不读任何外部路径。
+
+完整的「id → 文件 → 生成时的文件名 / 来源」对照在 **`sounds/SOURCES.md`**
+（33 个自制音效那张表由 `.workbuddy-ai/add-sounds.mjs` 生成，别手改）。
 
 | id | 试听名 | 来源 |
 |---|---|---|
@@ -105,6 +108,7 @@
 | `new017` / `new018` / `new02` / `new027` / `new03` | 新通知 0xx | universfield |
 | `positive` | 轻快提示 | universfield |
 | `system02` | 系统提示 | universfield |
+| `ethereal_notify` / `notify_clean` / `dingdong` / `marimba` … | 空灵 / 干净通知 / 叮咚 / 马林巴 …（共 33 个） | **本项目自己生成**（WAV；完整清单见 `sounds/SOURCES.md`） |
 | `none` | 静音 | — |
 
 - **播放**：宿主常驻 worker 用 WPF `System.Windows.Media.MediaPlayer` 播（`Volume` 0..1 直接控音量）。
@@ -129,9 +133,19 @@
 > 结果"导入的音效一旦被选中会被判非法、回落成 `bell`，下一次保存就把 `bell` 写进磁盘"，用户的设置被静默抹掉。
 > 现在两侧同口径：只校验 **id 语法**（`SOUND_ID_PATTERN`），"到底存不存在"由宿主扫盘决定。
 
+> **同一个坑又踩了一次（2026-10-03，收录 33 个自制音效）**：这次要动的地方从 2 处涨到 **4 处** ——
+> `SOUND_FILES` / `ENUM_FIELDS.soundPreset` / `SOUND_IDS` / `settings.sound.<id>` 的**中英各一条**标签；
+> 而且新增那批是 **WAV**，而 `package.json` 的 `files` 只写了 `sounds/*.mp3` ——
+> 症状是「源码目录里一切正常，从 GitHub 装的人下拉里有这个音效、点了没声」。
+> 原来的产物自检只**数 `.mp3` 的个数**，15 个 mp3 还在 ⇒ 照样绿灯，属于**典型的盲区**。
+> 现在两道新网：
+> ① `scripts/check-package.mjs` **逐个**核对 `SOUND_FILES` 点名的文件在不在产物里
+> （负控验过：去掉 `sounds/*.wav` 会精确点出全部 33 个缺失文件）；
+> ② `.workbuddy-ai/verify-sounds.mjs` 把**四份清单 + 磁盘文件 + 中英标签 + files 白名单**钉在一起。
+
 ---
 
-## 三个必须知道的坑
+## 八个必须知道的坑
 
 ### 坑一：别用 `ctx.remote.$on('approval/request', …)` 做审批提醒
 
@@ -200,6 +214,145 @@ node -e "import('@deepseek-ai/schemastery')"     # 在 profile 的插件目录�
 
 ---
 
+### 坑四：想给「边调边看」新写一套渲染（会与真机效果悄悄分叉）
+
+边框那三个指标（羽化 / 浓度 / 流速）只能等到**提醒真的发生**时才看得见效果，而提醒是等来的。
+用户要"调整时能实时看到"时，最直觉的做法是在页面里用 canvas / CSS 画一个"预览框"—— **千万别**。
+
+理由：页面版和原生版是两套数学。`win-overlay.cs` 的几何用 `SMin` 平滑最小值把直角轻轻倒圆
+（`k = 0.5 × 羽化`），`PathRadius` 又**只**用来参数化颜色而不参与 alpha —— 这些细节在页面里
+重写一遍必然漂成另一个样子。用户看到"预览"和"真机"不一样时，会以为真机坏了，而你会在错的地方查。
+
+**正确做法**：预览请宿主用**同一个** `RunOverlay` 画（`DvOverlay.ShowPreview`），并且让参数
+**活**起来（渲染线程每帧读静态字段，`UpdatePreview` 只改字段、**不重启窗口**）——
+于是"看到的"和"会发生的"是同一份代码。代价是三条容易漏的细节：
+
+1. **相位要按时间累积**（`phaseAcc += dt / spinMs`），不能用 `el % spinMs`。后者在流速改变的
+   那一刻相位会跳变（实测跳 0.11 圈），画面就是"闪一下"。（提醒路径仍用取模 —— 那条路
+   `speedPct` 恒定，两者逐帧等价；改的只是预览分支。）
+2. **羽化一变必须重建相位表**：`PathRadius` 依赖羽化，颜色参数化跟着它走。拿大羽化的表去画
+   小羽化，彩虹的疏密就对不上保存后的效果 —— 那预览就失去意义了。
+3. **预览每帧要清条带**：参数一变可画范围就变，上一帧画过、这一帧被 `d >= fade` 跳过的像素
+   会留在缓冲区里（把羽化拖小 → 角上一圈残影）。按"两帧里更大的 `span`"清。
+   提醒路径参数恒定，不做这件事、也不花这 ~1ms。
+
+⚠️ 另外两条链路细节：**演示期间 worker 不能空闲自退**（默认 60s），否则用户停手看效果时
+进程一退、屏幕上那圈边框就没了 —— 但标记要写成**截止时刻**而不是布尔量，放完自动恢复，
+否则一轮演示就白换一个永不退休的常驻进程（见 `worker.ps1` 的 `$script:previewUntil`）。
+
+**当前的交互不是"拖动时实时变"，而是「应用」→ 固定 10 秒演示**（用户定稿）：改滑条只动草稿，
+点「应用」才写配置 + 请宿主放一段带 `durationMs` 的演示，到点由 C# 自己收。
+上面那条活参数通道（`UpdatePreview`）仍在，将来想回到实时只需改设置页 —— 但那不只是"少点一次
+按钮"：实时预览还要求 `stop` **绕过任何节流立刻发**，否则压着的 `update` 会在 `stop` 之后到达，
+而 worker 对"没有在跑的预览"会**补开一个**，画面等于关不掉。
+
+这些事由 `node .workbuddy-ai/verify-glow-preview.mjs`（113 项，§4 是数值仿真且带负控）与
+`node .workbuddy-ai/render-section.mjs`（41 项，真渲染真点击）盯着。
+
+---
+
+### 坑五：让设置段组件去够 `apply(ctx)` 里的东西
+
+**症状**：点「应用」后**配置存了、桌面什么都不放、按钮也不变**；更糟的是**离开设置页时
+设置入口整个消失**。日志里只有一句 `ReferenceError: xxx is not defined`。
+
+**根因**：`client.js` 里 `function DoneVoiceSection(props)` 与 `function apply(ctx)` 是**平级函数**
+（都在工厂作用域下）。组件能看见的只有：工厂作用域的常量（`SOUND_IDS` / `GLOW_DEMO_MS` /
+`DEFAULT_CONFIG` …）、同级的组件函数（`RangeRow` …）、以及 `props`。
+**`apply` 里的任何东西它都够不着** —— 包括所有宿主桥（`sendGlowPreview`、`previewSound`…）。
+
+为什么"入口会消失"：这个引用是在**点击回调**与**卸载清理**里断的。卸载清理抛出的错误发生在
+React 的**提交阶段**，会把上面整片 UI 一起带走 —— 于是在用户眼里，插件表现成"把设置页弄坏了"。
+
+**正确做法**：宿主能力一律经 `apply` 里的 `face()`（`ctx.slots.register` 的 `inject`）传进
+`props` —— 与既有的 `update` / `preview` / `addSounds` 同一条路；组件侧拿不到就**降级**（提示
+"宿主还是旧版插件"），绝不抛错。组件里要用的常量放**工厂作用域**。
+
+**别指望文本判据**：当时 95 条判据全绿（它们只查"文件里有没有这个词"），而功能是死的。
+要抓这类错误只有两条路，两条都做了：
+
+- `.workbuddy-ai/render-section.mjs` —— 把真的组件抠到 Node 里，配无 DOM 垫片 + 最小 hooks，
+  **真的去点**两颗按钮。抠出来的那段代码作用域里**只有它真的够得着的名字**，
+  任何越界引用都会当场抛 `ReferenceError`。自带负控（把桥改回越界写法必须被抓到）。
+- `verify-glow-preview.mjs` 里那条静态判据查的是**任何引用**（`\bsendGlowPreview\b`），
+  不是"调用"（`sendGlowPreview(`）—— 第一版只认后者，于是 `const bridge = sendGlowPreview`
+  这种裸引用照样溜过去，而它同样会抛错。
+
+**顺带记一条**：演示计时器要用 `React.useRef` 持有，不能用闭包变量 —— 组件每轮渲染都会重新
+执行函数体，闭包变量下一帧就被重置成 `null`（「演示中…」永不恢复，连点两次也清不掉旧计时器）。
+
+---
+
+### 坑六：把自检的临时目录放进工作区（它会攒成看不见的十几兆）
+
+**症状**：工作区越来越大，而 `git status` 干干净净 —— 因为大件全在被 `.gitignore` 挡住的
+目录里，谁都看不见。实测工作区 20 MB，`.workbuddy-ai/` 一个人占 13 MB，其中 3 个
+`check-install-*` 目录各 4 MB。
+
+**根因**：`scripts/check-package.mjs` 要在隔离的 DSH_HOME 里跑一遍 `install.mjs`，
+那个 home 当时建在工作区内的 `.workbuddy-ai/` 下，**每一个里面都是一份完整的插件副本**。
+自检正常跑完会自己删掉；可进程一旦被中断（Ctrl-C、超时被杀、CI 取消、被沙箱拦下），
+`finally` 就不执行了。又因为它在 gitignore 里，没有任何一条常规检查会提醒你。
+
+**正确做法**：机器的临时产物**别落在工作区里** —— 用 `os.tmpdir()`。
+（原注释担心"installer 复制源码时会跳过它"，搬到工作区外之后这点自动成立。）
+如果确实要在本地留一份，就必须同时配一条**能自己收尾**的清理，
+而不是"下次开跑时顺手清" —— 后者在"再也没人开跑"时就等于永不清理。
+
+**顺带记一条通用教训**：`.gitignore` 挡住的目录是**盲区**。`git status` 干净 ≠ 磁盘干净；
+查体积要看 `du -sh .[!.]* *`，别只盯着被跟踪的那些文件。
+
+### 坑七：拿 `--dsw-alias-bg-layer-2` 当"最底层的背景"
+
+**症状**：某块面板在浅色主题下好好的，切到深色主题**文字整块消失**。
+
+**根因**：DSH 的 `--dsw-alias-bg-layer-1/2` 不是"两个层级的颜色"，而是**两种材质**：
+
+| 变量 | 性质 | 能当什么 |
+|---|---|---|
+| `--dsw-alias-bg-layer-1` | **实心**（浅色 `#fff`，深色 `#26272b`） | 可以当卡片底 |
+| `--dsw-alias-bg-layer-2` | **半透明**（浅色 `rgba(127,127,127,.14)`，深色 `rgba(255,255,255,.08)`） | 只能叠在**实心底之上** |
+
+layer-2 是"在已有底色上再压一层"用的。一旦它成了最底层（父元素没有实心背景），它就会去
+和页面背景叠加 —— 深色主题下半透明白叠上去那块变成**浅色**，而文字用的是
+`--dsw-alias-label-primary`（浅色）⇒ 对比度归零，字直接看不见。
+
+**正确做法**：要"淡色底"就用**实心底 + 蒙层**，两层都安全：
+
+```css
+background:var(--dsw-alias-bg-layer-1,#fff);
+background-image:linear-gradient(rgba(77,127,245,.09),rgba(77,127,245,.09));
+```
+
+**怎么发现**：这个是**截图看出来的**，不是推理出来的 —— 静态判据一条都抓不到它
+（`color:var(--dsw-alias-label-primary)` 完全合法，没有任何"错"可查）。所以改完配色
+一定要真截一张深色图看，手法见下方[「怎么亲眼看见设置页」](#怎么亲眼看见设置页)。
+
+### 坑八：把"可折叠"写成条件渲染
+
+**症状**：折叠功能看起来完全正常 —— 点一下收起、再点一下展开。但校验脚本开始**漏测**，
+键盘 / 读屏也莫名够不到收起区域里的控件。
+
+**根因**：`open ? children : null` 在收起时会把整棵子树**从虚拟树里摘掉**。
+`render-section.mjs` 这类"把真组件抠到 Node 里遍历虚拟树"的校验脚本**看不见 CSS**，
+只能看见"这个节点在不在" —— 于是"恰好处于收起态"的那次运行就少测了一片，
+而且失败是**静默**的（判据数少了而已，脚本照样报全绿）。
+
+**正确做法**：**永远渲染，收起只由 CSS 隐藏**：
+
+```js
+h('div', { className: 'dv-groupBody' }, props.children)   // 不判断 open：折叠只是视觉
+```
+
+```css
+.dv-groupClosed .dv-groupBody{display:none}
+```
+
+折叠状态用 `aria-expanded` 表达（读屏照样知道现在是开是关），而不是靠"不渲染"。
+`render-section.mjs` 里有一条判据钉死了这件事，并配了负控（注入条件渲染必须被抓到）。
+
+---
+
 ## 开发与验收
 
 **没有任何构建步骤**——改完 `client.js` 走客户端热重载；**宿主源码也支持热重载**（见 [NATIVE.md](./NATIVE.md) §8），否则需要重启桌面进程。
@@ -224,6 +377,31 @@ powershell -NoProfile -Command "[void][Windows.UI.Notifications.ToastNotificatio
 
 **上面这些只能证明"进了系统通知中心"，不能证明"你屏幕上看见了"**——横幅可见性由专注助手/勿扰/系统通知总开关决定，
 程序观测不到（真机用窗口类轮询试过），那一条只有人眼能定论（见文末验收清单）。
+
+### 怎么亲眼看见设置页
+
+设置页是纯 DOM + CSS，**不用启动 DSH** 就能看到真实观感 —— `verify-settings.mjs` 会把
+**真的**组件渲染成一份独立 HTML：
+
+```bash
+node .workbuddy-ai/verify-settings.mjs      # → .workbuddy-ai/verify-settings.html
+```
+
+再用本机现成的 Chromium 内核截图（Windows 自带 Edge，**不需要装任何东西**）：
+
+```bash
+"/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" \
+  --headless=new --disable-gpu --hide-scrollbars \
+  --force-device-scale-factor=2 --window-size=880,1300 \
+  --screenshot="out.png" \
+  "file:///<你的工作区>/.workbuddy-ai/verify-settings.html?theme=dark&glow=1"
+```
+
+- `?theme=dark` 换深色主题变量，`?glow=1` 替你展开「边框特效」。
+  **深色那一张必须看** —— 坑七就是只看浅色图绝对发现不了的那种。
+- 看不清细节就调大 `--force-device-scale-factor`（4 = 放大镜）并把 `--window-size` 只留顶部一条。
+- 配色问题**静态判据查不出来**（合法写法，没有"错"可查），这张图是唯一能兜住它的。
+- 截图产物放 `.workbuddy-ai/out/`（已被 gitignore，`install.mjs` 也会跳过），不要进仓库。
 
 ---
 

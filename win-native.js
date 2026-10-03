@@ -126,7 +126,7 @@ export const DEFAULT_READY_TIMEOUT_MS = 8000
 /**
  * **插件自带的提示音目录**（`sounds/`，跟着插件一起走）。
  *
- * 这些是收录进来的真实音效（MP3），不是运行时合成出来的：
+ * 这些是收录进来的真实音效（MP3 + WAV），不是运行时合成出来的：
  * 插件移动到任何地方、打包给别人，音效都跟着走，**不依赖任何外部目录**。
  * 播放用 WPF `MediaPlayer`（见 worker 的 PlaySound），因为 `SoundPlayer` 只吃 WAV。
  */
@@ -154,6 +154,39 @@ export const SOUND_FILES = Object.freeze({
   new03: 'new03.mp3',
   positive: 'positive.mp3',
   system02: 'system02.mp3',
+  ethereal_notify: 'ethereal_notify.wav',
+  ethereal_message: 'ethereal_message.wav',
+  ethereal_error: 'ethereal_error.wav',
+  notify_clean: 'notify_clean.wav',
+  dingdong: 'dingdong.wav',
+  chime2: 'chime2.wav',
+  shortmsg: 'shortmsg.wav',
+  popup: 'popup.wav',
+  prompt: 'prompt.wav',
+  error: 'error.wav',
+  deny: 'deny.wav',
+  click: 'click.wav',
+  toggle: 'toggle.wav',
+  mechanical_click: 'mechanical_click.wav',
+  bubble: 'bubble.wav',
+  marimba: 'marimba.wav',
+  arcade_powerup: 'arcade_powerup.wav',
+  kalimba: 'kalimba.wav',
+  laser_zap: 'laser_zap.wav',
+  typewriter: 'typewriter.wav',
+  pluck_bass: 'pluck_bass.wav',
+  celesta: 'celesta.wav',
+  coin: 'coin.wav',
+  sonar_ping: 'sonar_ping.wav',
+  wood_tock: 'wood_tock.wav',
+  warp_sweep: 'warp_sweep.wav',
+  heartbeat: 'heartbeat.wav',
+  ringtone_retro: 'ringtone_retro.wav',
+  glass_ping: 'glass_ping.wav',
+  step_click: 'step_click.wav',
+  bass_drop: 'bass_drop.wav',
+  sparkle_arp: 'sparkle_arp.wav',
+  mute_tap: 'mute_tap.wav',
 })
 
 /**
@@ -342,7 +375,7 @@ function wavDurationMs(buffer) {
  * 而音效文件在磁盘上、只有宿主的 worker 播得了，页面拿不到 ⇒ 时长只能由宿主量出来，
  * 随 `sounds.json` 一起交给页面。
  *
- * 覆盖面**刻意保守**：只解析 MP3 与 WAV（自带的 15 个音效全是 MP3）。其余格式返回 null，
+ * 覆盖面**刻意保守**：只解析 MP3 与 WAV（自带的音效正好全是这两种）。其余格式返回 null，
  * 由页面退回一个兜底时长——宁可"偶尔退回兜底"，也不要为全覆盖写一个会算错的解析器。
  * @param filePath 音频文件绝对路径。
  * @param ext 小写扩展名（含点）。
@@ -1474,6 +1507,11 @@ export function workerScript(options) {
     '$script:overlayReady = $false',
     '$script:overlayError = ' + psLiteral(overlaySource === null ? 'overlay-source-missing' : ''),
     '$script:overlayDpi = 0.0',
+    '# 演示的**预期结束时刻**。在它之前 worker 不做空闲自退 —— 否则演示还没放完，idleMs',
+    '# 一到就把 worker 收了，屏幕上那圈边框跟着消失。',
+    '# ⚠️ 用"时刻"而不是布尔量：演示是**固定时长**的（默认 10s），放完就该恢复正常自退。',
+    '#    布尔量的话置位后再没人清，worker 从此**永不退休**（一轮演示换一个常驻进程）。',
+    '$script:previewUntil = [DateTime]::MinValue',
     'function EnsureOverlay {',
     '    if ($script:overlayReady) { return $true }',
     "    if ($script:overlaySource -eq '') { return $false }",
@@ -1564,9 +1602,57 @@ export function workerScript(options) {
     "            $res.error = $res.error + ' | sound: ' + $_.Exception.Message",
     '        }',
     '    }',
+    '    # ── 边框调参预览（设置页点「调整」）：start / update / stop 三种动作。',
+    '    #    与 overlay 的分工：这里**不画卡片、不定时收工**，只管那一圈边框。',
+    '    #    关键在 update —— 它改的是 C# 侧的活参数，**不重启窗口**，所以拖滑条时',
+    '    #    画面是连续变化的（而不是一遍遍重建窗口地闪）。',
+    '    if ($null -ne $req.overlayPreview) {',
+    '        if (EnsureOverlay) {',
+    '            try {',
+    '                $dpi = OverlayDpi',
+    '                $action = [string]$req.overlayPreview.action',
+    "                if ($action -eq 'stop') {",
+    '                    [void]([DvOverlay]::Hide())',
+    '                    $script:previewUntil = [DateTime]::MinValue',
+    "                    $res.overlay = 'hidden'",
+    '                } else {',
+    '                    # fade 与 overlay 同一条折算：页面给的是逻辑像素，这里换成物理像素。',
+    '                    $fade = [int][Math]::Round(([double]$req.overlayPreview.fade) * $dpi / 96.0)',
+    '                    $intensity = [double]$req.overlayPreview.intensity',
+    '                    $speed = [double]$req.overlayPreview.speed',
+    '                    # 演示时长：页面固定给 10s；缺省 / 非法（≤0）交给 C# 的 DefaultDemoMs 兜底。',
+    '                    $durationMs = [int]$req.overlayPreview.durationMs',
+    "                    if ($action -eq 'update') {",
+    '                        $out = [DvOverlay]::UpdatePreview($fade, $intensity, $speed)',
+    '                        $parsed = $out | ConvertFrom-Json',
+    '                        # 没有在跑的预览（页面刚刷新过、或演示已经放完）⇒ 退化成开一个，',
+    '                        # 这样"改参数"在任何时序下都仍然看得见效果。',
+    "                        if ($parsed.ok -ne $true) { $action = 'start' }",
+    '                    }',
+    "                    if ($action -eq 'start') {",
+    '                        $out = [DvOverlay]::ShowPreview($dpi, $fade, $intensity, $speed, $durationMs)',
+    '                        $parsed = $out | ConvertFrom-Json',
+    '                    }',
+    "                    if ($action -eq 'start' -and $parsed.ok -eq $true) {",
+    '                        $demoMs = $durationMs',
+    '                        if ($demoMs -le 0) { $demoMs = 10000 }',
+    '                        # 只挡到演示结束为止：放完就恢复正常空闲自退（否则常驻进程永不退休）。',
+    '                        $script:previewUntil = [DateTime]::UtcNow.AddMilliseconds($demoMs)',
+    '                    }',
+    "                    if ($parsed.ok -eq $true) { $res.overlay = 'shown' }",
+    "                    else { $res.overlay = 'error'; $res.overlayError = [string]$parsed.error }",
+    '                }',
+    '            } catch {',
+    "                $res.overlay = 'error'; $res.overlayError = $_.Exception.Message",
+    '            }',
+    '        } else {',
+    "            $res.overlay = 'error'; $res.overlayError = $script:overlayError",
+    '        }',
+    '    }',
     '    # 覆盖层排在**最后**：它的首次编译要 ~320ms，绝不能挡在 toast 与音效前面。',
     '    if ($req.overlayHide -eq $true) {',
     '        if (EnsureOverlay) { try { [void]([DvOverlay]::Hide()) } catch { } }',
+    '        $script:previewUntil = [DateTime]::MinValue',
     "        $res.overlay = 'hidden'",
     '    }',
     '    if ($null -ne $req.overlay) {',
@@ -1609,7 +1695,7 @@ export function workerScript(options) {
     'while ($true) {',
     '    if ($null -eq $async) { $async = $stdin.BeginRead($buffer, 0, $buffer.Length, $null, $null) }',
     '    if (-not $async.AsyncWaitHandle.WaitOne(500)) {',
-    '        if (([DateTime]::UtcNow - $last).TotalMilliseconds -gt $script:idleMs) { exit 0 }',
+    '        if (([DateTime]::UtcNow - $last).TotalMilliseconds -gt $script:idleMs -and [DateTime]::UtcNow -gt $script:previewUntil) { exit 0 }',
     '        continue',
     '    }',
     '    $count = 0',
@@ -1908,11 +1994,11 @@ export function createNativeNotifier(options) {
     clearTimeout(entry.timer)
     // 前台探测的回执是"原样 JSON"，不走投递结果那套翻译。
     if (entry.presence === true) entry.resolve(payload !== null && typeof payload === 'object' ? payload : { present: false })
-    else entry.resolve(normalizeResult(payload, entry.wantSound, entry.soundOnly, entry.wantOverlay))
+    else entry.resolve(normalizeResult(payload, entry.wantSound, entry.soundOnly, entry.wantOverlay, entry.previewExpect))
   }
 
   /** 把 worker 的回执翻译成冻结接口要求的 { delivered, degraded }。 */
-  function normalizeResult(payload, wantSound, soundOnly, wantOverlay) {
+  function normalizeResult(payload, wantSound, soundOnly, wantOverlay, previewExpect) {
     const delivered = []
     const degraded = []
     const ok = payload !== null && typeof payload === 'object' ? payload : {}
@@ -1932,6 +2018,11 @@ export function createNativeNotifier(options) {
     // 系统通知与音效那条路照常送达，页面据此决定要不要补一张页内卡片。
     if (wantOverlay) {
       if (ok.overlay === 'shown') delivered.push('overlay')
+      else degraded.push('overlay-failed')
+    } else if (previewExpect !== null && previewExpect !== undefined) {
+      // 调参预览：start/update 期望 'shown'，stop 期望 'hidden' —— **收起来也是成功**。
+      // 不能一律按 'shown' 判，否则每次保存/收起都会平白报一条降级。
+      if (ok.overlay === previewExpect) delivered.push('overlay')
       else degraded.push('overlay-failed')
     }
     if (ok.error) log('[donevoice] native 投递降级 — ' + String(ok.error))
@@ -2101,9 +2192,14 @@ export function createNativeNotifier(options) {
     const overlay = msg.overlay !== null && typeof msg.overlay === 'object' ? msg.overlay : null
     // 收起覆盖层（用户已经响应过时用，见 hideOverlay）。
     const overlayHide = msg.overlayHide === true
-    // ⚠️ `overlayHide` 必须参与这个短路判断：它既没有音效也没有 overlay 参数，
-    //    漏掉的话请求根本不会发到 worker，"收起"就成了空操作。
-    if (soundOnly && soundRequest === null && overlay === null && overlayHide !== true) {
+    // 边框调参预览（设置页点「调整」）。与 `overlay` 互斥：这一条不画卡片、不定时收工，
+    // 而且 update 只改 C# 侧的活参数、**不重启窗口**（拖滑条时画面才连续）。
+    const overlayPreview = msg.overlayPreview !== null && typeof msg.overlayPreview === 'object' ? msg.overlayPreview : null
+    // 预览期望的回执值：stop 收起来也是成功（回 'hidden'），start/update 要 'shown'。
+    const previewExpect = overlayPreview === null ? null : (overlayPreview.action === 'stop' ? 'hidden' : 'shown')
+    // ⚠️ `overlayHide` / `overlayPreview` 必须参与这个短路判断：它们既没有音效也没有 overlay 参数，
+    //    漏掉的话请求根本不会发到 worker，"收起"和"预览"就都成了空操作。
+    if (soundOnly && soundRequest === null && overlay === null && overlayHide !== true && overlayPreview === null) {
       // 没有可播的音效（静音/音量为 0/合成失败）⇒ 什么都不做，也不算失败。
       if (soundBroken) {
         state.failures += 1
@@ -2137,6 +2233,8 @@ export function createNativeNotifier(options) {
       overlay,
       // 收起覆盖层。与 overlay 互斥使用，不传时 worker 也不会碰它。
       overlayHide,
+      // 边框调参预览：`{ action: 'start'|'update'|'stop', fade, intensity, speed }`。
+      overlayPreview,
     }
     const result = await new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -2154,6 +2252,7 @@ export function createNativeNotifier(options) {
         wantSound: soundRequest !== null,
         soundOnly,
         wantOverlay: overlay !== null,
+        previewExpect,
       })
       const line = id + ' ' + Buffer.from(JSON.stringify(request), 'utf8').toString('base64') + '\n'
       const stdin = worker.child?.stdin
@@ -2276,6 +2375,63 @@ export function createNativeNotifier(options) {
   }
 
   /**
+   * 边框调参预览：让原生覆盖层**只画整屏边框**并一直亮着，参数可随时改。
+   *
+   * 与 `overlay(spec)`（那是"提醒"）的三点区别：
+   *   · 不画卡片、不定时收工 —— 参数就是用来慢慢试手感的；
+   *   · `update` 改的是 C# 侧**活参数**，不重启窗口 ⇒ 拖滑条时画面连续，不是一遍遍闪；
+   *   · 不入通知去重、不碰任何开关（用户点了「调整」就是想看效果）。
+   * 复用 `deliver` 是为了继承同一套超时 / 降级 / 管道 pin 语义。
+   * @param action `'start'` | `'update'` | `'stop'`。
+   * @param spec `{ fade, intensity, speed }`（逻辑像素 / 0..1 / 百分比）；`stop` 时忽略。
+   * @returns `{ shown, degraded }`；永不 reject。
+   */
+  async function overlayPreview(action, spec) {
+    if (state.disposed) return { shown: false, degraded: ['disposed'] }
+    if (platform !== 'win32') return { shown: false, degraded: ['not-windows'] }
+    const what = action === 'start' || action === 'update' || action === 'stop' ? action : null
+    if (what === null) return { shown: false, degraded: ['bad-action'] }
+    const args = spec !== null && typeof spec === 'object' ? spec : {}
+    const fade = Number(args.fade)
+    const intensity = Number(args.intensity)
+    const speed = Number(args.speed)
+    // 演示时长（毫秒）。给不出有效值就传 0 —— worker 与 C# 都会退回默认的 10 秒。
+    const durationMs = Number(args.durationMs)
+    state.calls += 1
+    state.pendingNotifies += 1
+    applyPin()
+    try {
+      const result = await deliver({
+        kind: 'test',
+        title: '',
+        body: '',
+        sound: null,
+        soundOnly: true,
+        overlayPreview: {
+          action: what,
+          fade: Number.isFinite(fade) ? fade : 46,
+          intensity: Number.isFinite(intensity) ? intensity : 1,
+          speed: Number.isFinite(speed) ? speed : 100,
+          durationMs: Number.isFinite(durationMs) ? durationMs : 0,
+        },
+      }, Date.now())
+      // ⚠️ `delivered` 里的 'overlay' 意思是「这条请求**达成了它的期望**」，不是「正在显示」：
+      //    stop 的期望是 `hidden`，达成了也一样会进 delivered（见 normalizeResult 的
+      //    `ok.overlay === previewExpect`）。所以这里必须按动作折算，否则 stop 成功会被
+      //    读成"正在显示" —— 调用方照着 `shown` 判断就会把已经关掉的边框当成还开着。
+      const satisfied = Array.isArray(result.delivered) && result.delivered.includes('overlay')
+      state.lastOverlay = satisfied ? what : 'preview-failed:' + result.degraded.join(',')
+      return { shown: satisfied && what !== 'stop', degraded: result.degraded }
+    } catch (error) {
+      state.lastOverlay = 'preview-threw'
+      return { shown: false, degraded: ['overlay-threw:' + String(error)] }
+    } finally {
+      state.pendingNotifies -= 1
+      applyPin()
+    }
+  }
+
+  /**
    * 收起原生覆盖层（如果正显示着）。
    *
    * 为什么需要它：覆盖层是 `WS_EX_TOPMOST` 且**铺满整块屏幕**的。它会自然到期，
@@ -2295,6 +2451,6 @@ export function createNativeNotifier(options) {
     }
   }
 
-  const notifier = { notify, presence, release, status, dispose, aumid, warmup, overlay, hideOverlay }
+  const notifier = { notify, presence, release, status, dispose, aumid, warmup, overlay, hideOverlay, overlayPreview }
   return notifier
 }

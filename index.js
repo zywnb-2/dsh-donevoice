@@ -45,7 +45,7 @@ import { MAX_SOUND_BYTES, SOUND_EXTS, SOUND_FILES, TOAST_ICONS, clickMarkerFile,
 export const name = 'donevoice'
 
 /** 版本（与 package.json / client.js 对齐，由 `scripts/check-package.mjs` 钉住三处一致）。 */
-export const version = '1.2.0'
+export const version = '1.3.0'
 
 /**
  * 覆盖层去重窗口（毫秒）。
@@ -75,6 +75,20 @@ export const NOTIFY_PATH = '/plugins/dsh-donevoice/notify'
  * 语义上它是"只播音效、不弹通知"，与 `notify` 的 `soundOnly` 完全同路，因此不重复实现播放逻辑。
  */
 export const PREVIEW_PATH = '/plugins/dsh-donevoice/preview'
+
+/**
+ * 边框演示路由（`/plugins/dsh-donevoice/glow-preview`）。
+ *
+ * 存在理由：边框那三个指标（羽化 / 浓度 / 流速）**过去只在提醒真的发生时**才看得到，
+ * 而提醒是等来的 —— 调参全靠猜。设置页点「应用」时请宿主把那一圈边框画出来，
+ * 而且**必须是同一份实现在画**（原生覆盖层 `win-overlay.cs`），
+ * 否则演示和真机效果对不上，等于白调。
+ *
+ * 演示是**固定时长**的（`durationMs`，页面给 10s），到点自己收掉。
+ * `action: 'update'` 走 C# 侧的**活参数**（不重启窗口），保留给"连续调整"这类用法，
+ * 当前设置页的交互（改完点「应用」）用不到它。
+ */
+export const GLOW_PREVIEW_PATH = '/plugins/dsh-donevoice/glow-preview'
 
 /**
  * 音效管理路由（`/plugins/dsh-donevoice/sounds.json`）：
@@ -1029,6 +1043,69 @@ async function previewHandler(req, res) {
 }
 
 /**
+ * `POST /plugins/dsh-donevoice/glow-preview`：设置页点「应用」时的**边框演示**。
+ *
+ * **有意不看任何开关**（与上面「试听」同一条理由）：用户点了「应用」就是想看这一圈边框，
+ * 被"边框光效关着"或"形态不是顶部卡片"挡住，只会让人以为功能坏了。
+ *
+ * 参数在这里 clamp 到与配置**同一区间** —— 页面传个 999 进来，相位表会按那个羽化宽度
+ * 去建，白烧几百毫秒还把画面算得不成样子。
+ * @param req Node 请求对象。
+ * @param res Node 响应对象。
+ */
+async function glowPreviewHandler(req, res) {
+  const method = String(req?.method ?? 'GET').toUpperCase()
+  if (method !== 'POST') {
+    res.statusCode = 405
+    res.setHeader('allow', 'POST')
+    res.setHeader('cache-control', 'no-store')
+    res.end()
+    return
+  }
+  const body = await readJsonWrite(req, res)
+  if (body === null) return
+  const action = body.action === 'start' || body.action === 'update' || body.action === 'stop' ? body.action : null
+  if (action === null) {
+    respond(res, 400, JSON.stringify({ ok: false, error: 'bad-action' }))
+    return
+  }
+  const spec = {
+    fade: clampInt(body.fade, 16, 110, 46),
+    // 页面给的是百分比（30~100），覆盖层要 0..1 —— 与 resolvePresentation 同一折算。
+    intensity: clampInt(body.intensity, 30, 100, 100) / 100,
+    speed: clampInt(body.speed, 30, 220, 100),
+    // 演示时长（毫秒）：页面固定给 10s。
+    // ⚠️ 上限 30s 是**刻意**压住的：再长就要逼近 worker 的空闲自退阈值（60s），
+    //    万一 worker 中途自退，屏幕上那圈边框会莫名其妙消失（用户看到的是"演示断了"）。
+    durationMs: clampInt(body.durationMs, 1000, 30000, 10000),
+  }
+  // 收起一律按成功回执：它本来就是"让画面消失"，没有可失败的余地，
+  // 报失败只会让页面在保存时平白弹一句降级。
+  if (action === 'stop') {
+    try {
+      await getNotifier().overlayPreview('stop', spec)
+    } catch (error) {
+      console.warn('[donevoice] 边框预览停止失败 — ' + String(error))
+    }
+    respond(res, 200, JSON.stringify({ ok: true, action, shown: false }))
+    return
+  }
+  try {
+    const outcome = await getNotifier().overlayPreview(action, spec)
+    const shown = outcome !== null && typeof outcome === 'object' && outcome.shown === true
+    respond(res, 200, JSON.stringify({
+      ok: true,
+      action,
+      shown,
+      degraded: outcome?.degraded ?? [],
+    }))
+  } catch (error) {
+    console.error('[donevoice] 边框预览失败 — ' + String(error))
+    respond(res, 500, JSON.stringify({ ok: false, error: 'internal' }))
+  }
+}
+
+/**
  * `/plugins/dsh-donevoice/sounds.json`：音效清单 / 导入 / 删除。
  * @param req Node 请求对象。
  * @param res Node 响应对象。
@@ -1254,7 +1331,7 @@ async function healthHandler(req, res) {
       fields: Object.keys(DEFAULT_CONFIG).length,
       configPath: configFile(),
       config: readConfig(),
-      routes: { config: CONFIG_PATH, health: HEALTH_PATH, notify: NOTIFY_PATH, preview: PREVIEW_PATH, sounds: SOUNDS_PATH },
+      routes: { config: CONFIG_PATH, health: HEALTH_PATH, notify: NOTIFY_PATH, preview: PREVIEW_PATH, glowPreview: GLOW_PREVIEW_PATH, sounds: SOUNDS_PATH },
       contract: configContractStatus(),
       native: nativeStatus(),
       sensors: sensorStatus(),
@@ -1498,6 +1575,7 @@ export function apply(ctx) {
     scope.effect(() => scope.webServer.register({ kind: 'exact', path: HEALTH_PATH, handler: healthHandler }), 'donevoice: health route')
     scope.effect(() => scope.webServer.register({ kind: 'exact', path: NOTIFY_PATH, handler: notifyHandler }), 'donevoice: notify route')
     scope.effect(() => scope.webServer.register({ kind: 'exact', path: PREVIEW_PATH, handler: previewHandler }), 'donevoice: preview route')
+    scope.effect(() => scope.webServer.register({ kind: 'exact', path: GLOW_PREVIEW_PATH, handler: glowPreviewHandler }), 'donevoice: glow preview route')
     scope.effect(() => scope.webServer.register({ kind: 'exact', path: SOUNDS_PATH, handler: soundsHandler }), 'donevoice: sounds route')
   })
 }
