@@ -45,5 +45,8 @@ jobs:
             echo "ok  $file"
           done
 
+      - name: 配置契约对拍（host-config.js ↔ client.js 内联副本）
+        run: node scripts/check-config-contract.mjs
+
       - name: 发布自检
         run: node scripts/check-package.mjs

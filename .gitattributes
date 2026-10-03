@@ -17,3 +17,37 @@
 *.jpg binary
 *.svg text eol=lf
 cordis.patch.yml text eol=lf
+
+# ══════════════════════════════════════════════════════════════════════════
+# export-ignore：这些是**开发用**文件，别人安装时不需要，从下载包里排除。
+#
+# 为什么需要它：安装走的是 pnpm 的 git 依赖通道 —— 它**先把整个仓库的
+# codeload tarball 拉下来**，再按 package.json 的 `files` 白名单过滤。
+# 也就是说 `files` 只管"装完之后留下什么"，**管不到下载体积**。
+# 这一个文件的几十行，抵掉的是每个安装者都要多下 ~490 KB。
+#
+# 与 `files` 白名单的**分工**：
+#   · `files`         → 决定"装完之后 node_modules 里有什么"（运行时必需）
+#   · `export-ignore` → 决定"下载时拉什么"（开发期才用的）
+# 两者互不重叠：这里排除的路径一个都不在 `files` 里。
+#
+# ⚠️ 千万不要把 `files` 里的东西写进来（index.js / client.js / sounds/ / locale/ …），
+#    那会让用户装到残包。改完请跑 `node scripts/check-package.mjs` 复核。
+#
+# ⚠️ 这只影响**归档下载**（codeload / git archive）。GitHub 网页上这些文件照常能看，
+#    git clone 与 CI 也照常拿得到 —— 所以是"零损失"的瘦身。
+# ══════════════════════════════════════════════════════════════════════════
+
+# 设计文档与工程文档：只有维护者要看。
+ARCHITECTURE.md export-ignore
+NATIVE.md export-ignore
+DEVELOPMENT.md export-ignore
+RELEASE.md export-ignore
+
+# 仓库自身的开发与发布工具（CI 用 git clone，不受影响）。
+scripts/ export-ignore
+.github/ export-ignore
+
+# 文档配图与设计产物：只在 GitHub 网页上渲染 README 时用得上，
+# 而且 `files` 本来就不含 docs/，装完之后它们也是不存在的。
+docs/ export-ignore

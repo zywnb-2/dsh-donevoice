@@ -51,12 +51,19 @@ const REQUIRED_IN_PACKAGE = [
   'host-config.js',
   'host-sensors.js',
   'win-native.js',
+  // ⚠️ `win-overlay.cs` 是**运行时从插件目录读**的（`win-native.js` 的 `readOverlayScript()`，
+  //    读成文本、拼进 worker 由 PowerShell 现场 `Add-Type` 编译）。
+  //    它不在 `files` 里的后果不是"少个装饰"，而是**顶部提醒整个消失**，
+  //    而且失败是静默的（只在日志里留一行 `overlay-source-missing`）。所以必须钉住。
+  'win-overlay.cs',
   'client.js',
   'cordis.patch.yml',
   'icon.svg',
   'locale/zh.json',
   'locale/en.json',
   'sounds/bell.mp3',
+  // 本地 ZIP 安装流程要用（从 GitHub 装的话用不到，但它在 `files` 里是**有意**的）。
+  'install.mjs',
   'LICENSE',
 ]
 
@@ -225,6 +232,35 @@ if (Object.keys(peers).length === 0) {
   }
 }
 
+// ------------------------------------------------- 宿主半区不许 import 裸包名
+
+section('宿主半区无裸包名 import（链接期炸点）')
+// 为什么必须有这条：宿主半区**静态 import 任何裸包名**，一旦 profile 的 node_modules 里
+// 没有它，就是**链接期错误** —— 整个宿主条目加载失败，表现成"插件装上去像没装"。
+// 真机踩过一次（`@deepseek-ai/schemastery`，照 DSH 源码的官方写法来的），代价是整条原生通道不工作。
+// 只有 `node:*` 内置模块与相对路径是安全的。
+const HOST_HALF_FILES = ['index.js', 'host-config.js', 'host-sensors.js', 'win-native.js']
+const bareImports = []
+for (const rel of HOST_HALF_FILES) {
+  const text = readFileSync(join(ROOT, rel), 'utf8')
+  const specs = [
+    ...[...text.matchAll(/^\s*(?:import|export)\b[^\n]*?\bfrom\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]),
+    ...[...text.matchAll(/^\s*import\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]),
+  ]
+  for (const spec of specs) {
+    if (spec.startsWith('.') || spec.startsWith('node:')) continue
+    bareImports.push(`${rel} → ${spec}`)
+  }
+}
+if (bareImports.length === 0) {
+  ok('宿主半区只用 node:* 与相对导入', `${HOST_HALF_FILES.length} 个文件`)
+} else {
+  fail(
+    '宿主半区出现了裸包名 import',
+    `${bareImports.join('、')}；这在 profile 里是**链接期错误**，整个宿主条目会加载失败（插件看起来像没装）`,
+  )
+}
+
 // ------------------------------------------------- 入口 id 与 client 一致
 
 section('入口 id 一致性')
@@ -243,6 +279,25 @@ if (!hostId) {
     'patch id 与 client 不一致',
     `patch 里是 [${patchIds.join(', ')}]，client.js 里是 "${hostId}"；设置页会读不到值`,
   )
+}
+
+// ------------------------------------------------- 配置契约对拍（两份副本）
+
+section('配置契约（host-config.js vs client.js 内联副本）')
+// 单独一个脚本，因为它是**纯逻辑**检查、不需要打包；但放在这里跑是为了让本地
+// 一条命令就能覆盖全部检查项，而不是"CI 上才知道红了"。
+try {
+  const out = execFileSync(process.execPath, [join(ROOT, 'scripts', 'check-config-contract.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 30_000,
+  })
+  const last = out.trim().split('\n').filter(Boolean).pop() ?? ''
+  ok('两份副本一致', last.replace(/^\u2713\s*/, ''))
+} catch (error) {
+  const detail = String(error.stdout ?? '').trim().split('\n').filter(Boolean).slice(-4).join(' / ')
+  fail('配置契约对拍失败', detail || String(error.message).split('\n')[0])
 }
 
 // ---------------------------------------------------------------- 打包产物
@@ -276,6 +331,61 @@ if (packed) {
   const packagedLocale = packed.filter((p) => p.startsWith('locale/'))
   if (packagedLocale.length > 0) ok('产物含语言包', packagedLocale.join(', '))
   else fail('产物含语言包', 'locale/*.json 没进包，设置页文案会回退')
+
+  // ------------------------------------------------ export-ignore 不得误伤运行时文件
+  //
+  // `.gitattributes` 里的 `export-ignore` 决定**下载时拉什么**，`files` 决定**装完之后留什么**。
+  // 两者一旦重叠，用户会装到**残包**：下载里没有那个文件，`files` 也就无从过滤。
+  // 而且这种坏法是**静默**的——本地开发用的是完整工作区，一切正常，
+  // 只有从 GitHub 装的人才会缺文件。所以必须在这里挡住。
+  // 用 `git check-attr` 直接问"这个路径被 export-ignore 了吗"，比生成归档再比对更准
+  // （归档读的是已提交的树，尚未提交的新文件会造成假报警）。
+  if (packed.length > 0) {
+    // ⚠️ **必须把每一级祖先目录也问一遍**。
+    //    `git check-attr` 对"目录规则"只在**目录路径本身**返回 `set`，
+    //    对目录里的文件返回 `unspecified` —— 而 `git archive` 是**真的**按目录规则排除的。
+    //    实测：`.gitattributes` 里写了 `scripts/ export-ignore`，
+    //      `git check-attr export-ignore -- scripts/check-package.mjs` → unspecified（骗人）
+    //      `git archive` 里 `scripts/` 一个文件都没有（真的排除了）
+    //    只问文件路径的话，`scripts/` `docs/` 这类目录规则会**整个漏过**这个守卫。
+    const probes = []
+    for (const rel of packed) {
+      const parts = rel.split('/')
+      for (let i = 1; i < parts.length; i += 1) probes.push(parts.slice(0, i).join('/') + '/')
+      probes.push(rel)
+    }
+    let ignored = new Set()
+    try {
+      const raw = execFileSync('git', ['check-attr', '-z', 'export-ignore', '--', ...probes], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      // `-z` 输出是 `路径\0属性\0值\0` 三元组
+      const parts = raw.split('\0')
+      for (let i = 0; i + 2 < parts.length; i += 3) {
+        if (parts[i + 2] === 'set' || parts[i + 2] === 'true') ignored.add(parts[i])
+      }
+    } catch (error) {
+      ignored = null
+      notes.push(`git check-attr 未能执行（${String(error.message).split('\n')[0]}），跳过 export-ignore 误伤检查`)
+    }
+    if (ignored !== null) {
+      const hurt = packed.filter((rel) => {
+        const parts = rel.split('/')
+        for (let i = 1; i < parts.length; i += 1) if (ignored.has(parts.slice(0, i).join('/') + '/')) return true
+        return ignored.has(rel)
+      })
+      if (hurt.length === 0) {
+        ok('export-ignore 未误伤运行时文件', `${packed.length} 个产物路径（含各级父目录）全部未被排除`)
+      } else {
+        fail(
+          'export-ignore 把运行时文件也排除了',
+          `${hurt.join('、')}；下载包里会没有它们，从 GitHub 安装的用户会装到残包。把对应那几行从 .gitattributes 里删掉`,
+        )
+      }
+    }
+  }
 }
 
 // ------------------------------------------------- 本地 ZIP 安装路径（隔离 profile）
@@ -286,10 +396,16 @@ const testRoot = join(ROOT, '.workbuddy-ai')
 mkdirSync(testRoot, { recursive: true })
 
 // 上一次自检若被中断（Ctrl-C、超时被杀、编辑器里点了停止），下面的隔离目录会留在
-// .workbuddy-ai 下——里面是一份完整的插件源码副本，约 2 MB。攒几次就是几十兆，
+// .workbuddy-ai 下——里面是一份完整的插件源码副本，约 1.9 MB。攒几次就是几十兆，
 // 而且它被 .gitignore 挡着，`git status` 里完全看不见，很容易一直没人发现。
-// 所以每次开跑前先扫一遍：只删**超过 1 小时**的，避免误伤正在并行跑的另一次自检。
-const STALE_TEST_HOME_MS = 60 * 60 * 1000
+// 所以每次开跑前先扫一遍，删掉**陈旧的**隔离目录。
+//
+// 阈值 `10` 分钟怎么来的：自检本体只需要几秒，10 分钟是 **100 倍**余量，
+// 足够让"并行跑的另一次自检"不被打断；而原值 `60` 分钟太长——实测稳态会攒到
+// 6~7 个（≈14 MB）才轮到被清。顺带说明：残留**不只是**自检中断造成的，
+// 外部冒烟脚本（拿 `.workbuddy-ai/check-install-` 当临时 DSH_HOME 的那种）也会漏，
+// 而它们不会自己收尾 ⇒ 这里扫得勤一点，等于给整个工作区兜底。
+const STALE_TEST_HOME_MS = 10 * 60 * 1000
 for (const entry of readdirSync(testRoot, { withFileTypes: true })) {
   if (!entry.isDirectory() || !entry.name.startsWith('check-install-')) continue
   const stale = join(testRoot, entry.name)

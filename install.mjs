@@ -180,12 +180,15 @@ function writeJson(path, value) {
 
 /**
  * 把插件目录整棵复制到目标位置（跳过 `.git`、`node_modules` 与本地工作数据）。
+ *
+ * `.workbuddy-ai` 与 `.workbuddy` 都是"开发时托管 Agent 的工作目录"（两代 harness 各用各的名字），
+ * 它们是本机私有数据、不属于插件产物 —— 一起跳过，免得每次安装都往 `.dsh` 里塞一份日志。
  * @param from 源目录。
  * @param to 目标目录（须已存在）。
  */
 function copyPluginTree(from, to) {
   for (const name of readdirSync(from)) {
-    if (name === '.git' || name === '.workbuddy-ai' || name === 'node_modules') continue
+    if (name === '.git' || name === '.workbuddy-ai' || name === '.workbuddy' || name === 'node_modules') continue
     const source = join(from, name)
     const target = join(to, name)
     if (statSync(source).isDirectory()) {

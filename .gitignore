@@ -10,5 +10,12 @@ Thumbs.db
 .vscode/
 .idea/
 
-# AI 工作区（会话缓存、临时脚本），不进版本库
+# 设计期产物：可交互原型、渲染验证截图、逐像素测量输出。
+# 它们是**过程**，不是产物——插件实装后就没用了，也不该被谁 clone 下来。
+# 真需要重新生成时，`.workbuddy-ai/` 下的 `verify-*.mjs` 随时能再出一套。
+docs/prototype/
+
+# AI 工作区（会话缓存、临时脚本、工作记忆），不进版本库。
+# `.workbuddy-ai` 与 `.workbuddy` 是两代 harness 各用的目录名（见 install.mjs 的跳过列表）。
 .workbuddy-ai/
+.workbuddy/
